@@ -1,0 +1,28 @@
+{
+  "name": "agent-governance-poc",
+  "version": "0.1.0",
+  "description": "Proof-of-concept: governance control plane for AI agents (registry, policy engine, gateway, evidence ledger)",
+  "type": "module",
+  "main": "dist/demo/scenario.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "demo": "npm run build && node dist/demo/scenario.js",
+    "demo:mcp": "npm run build && node dist/demo/mcp-scenario.js",
+    "server": "npm run build && node dist/gateway/server.js",
+    "mcp": "npm run build && node dist/gateway/mcp.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.1",
+    "better-sqlite3": "^11.3.0",
+    "express": "^4.21.0",
+    "nanoid": "^5.0.7",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.11",
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.7.4",
+    "typescript": "^5.6.2"
+  }
+}
