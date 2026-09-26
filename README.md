@@ -6,15 +6,15 @@ ledger → approval flow → kill switch. It proves the differentiator — a
 stateful policy engine and tamper-evident evidence — with real, runnable
 code, not a mockup.
 
-The gateway is also exposed as an **MCP server** (`npm run mcp`) so a real
-agent framework can call it over the wire instead of only in-process.
+The **MCP gateway** exposes business tools (`issue_refund`) with governance
+applied server-side. Any MCP-capable agent framework (Claude Agent SDK,
+LangGraph, OpenAI Agents SDK, …) calls the same tool; it does not need to
+know about policies or the ledger.
 
 ## What this is not
 
 Not the full MVP. No console UI, no real Slack integration (a console-log
-stand-in plays that role), no Postgres. Those are later roadmap weeks. See the
-"Roadmap to a demo-ready proof of concept" section of the product spec doc
-for what comes next and in what order.
+stand-in plays that role), no Postgres. Those are later roadmap weeks.
 
 ## Requirements
 
@@ -27,78 +27,90 @@ for what comes next and in what order.
 npm install
 ```
 
-## Run the demo
+## Run the in-process demo
 
 ```bash
 npm run demo
 ```
 
-This runs `src/demo/scenario.ts`: registers a refund-issuing agent, sets a
-policy with an auto-allow threshold, a human-approval threshold, and a
-stateful daily cumulative cap, then fires a sequence of refund calls that
-exercise all three paths (allow, hold-for-approval, deny), resolves an
-approval, queries the ledger, verifies the hash chain, and shows the kill
-switch suspending the agent mid-flow.
+Registers a refund agent, installs the policy (auto-allow ≤ SGD 200, human
+approval above, stateful daily cap SGD 1,000), runs the allow / hold /
+approve / deny sequence, verifies the hash chain, and demos the kill switch.
 
-Each run creates a fresh `demo-ledger.db` (SQLite) in this directory.
-
-## Run it as an HTTP service
+## Run as an HTTP service
 
 ```bash
 npm run server
 ```
 
-Starts an HTTP server on port 8787 exposing the same registry, policy
-engine, gateway and ledger over a plain REST API — see `src/gateway/server.ts`
-for the routes.
+REST API on port 8787 — see `src/gateway/server.ts`.
 
-## Run it as an MCP server
+## Run as an MCP gateway (roadmap week 5-6)
 
 ```bash
 npm run mcp
 ```
 
-Starts the same control plane as a Model Context Protocol server on **stdio**
-(`src/gateway/mcp.ts`). Point an MCP client (Claude Agent SDK, LangGraph MCP
-adapter, Cursor, etc.) at:
+Stdio MCP server (`src/mcp/server.ts`). Tools exposed to agents:
+
+- `issue_refund` — governed business tool
+- `check_approval` — poll a held call
+
+Point any MCP client at:
 
 ```json
 {
   "command": "node",
-  "args": ["dist/gateway/mcp.js"],
-  "cwd": "/path/to/this/repo",
+  "args": ["dist/mcp/server.js"],
   "env": { "LEDGER_DB": "./mcp-ledger.db" }
 }
 ```
 
-Tools exposed: `register_agent`, `approve_agent`, `suspend_agent`,
-`set_policy`, `governed_call`, `decide_approval`, `list_agents`,
-`list_agent_events`, `verify_ledger`.
+### Out-of-band approvals (separate OS process)
 
-### MCP end-to-end smoke test
+When a call is held, resolve it without the agent process touching the
+decision — separation of duties across process boundaries:
 
 ```bash
-npm run demo:mcp
+LEDGER_DB=./mcp-ledger.db npm run mcp:approve -- decide <approvalId> approve
+LEDGER_DB=./mcp-ledger.db npm run mcp:approve -- status <approvalId>
+LEDGER_DB=./mcp-ledger.db npm run mcp:approve -- verify
 ```
 
-Spawns the MCP server as a child process and drives the same refund scenario
-as `npm run demo`, entirely over MCP tool calls.
+### Protocol-level MCP test (no API key)
+
+```bash
+npm run mcp:test-client
+```
+
+Spawns the MCP server, drives the full refund sequence over real MCP stdio,
+resolves a hold via a separate `mcp:approve` process, and verifies the hash
+chain across three OS processes.
+
+### Claude Agent SDK client
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+npm run agent:claude
+```
+
+Without a key the script exits with clear instructions; use `mcp:test-client`
+to prove the gateway without a model.
+
+### Admin MCP tools (optional)
+
+`npm run mcp:admin` still exposes registry/policy/ledger admin tools from
+`src/gateway/mcp.ts` for operators. Agents should use `npm run mcp` instead.
 
 ## Where the differentiator lives
 
-- `src/policy/engine.ts` — the stateful velocity/cumulative rule evaluation.
-  Most policy engines (OPA, Cedar) evaluate one request at a time; this adds
-  a layer that looks back across the ledger to catch cumulative risk a
-  single-call check would miss.
-- `src/ledger/ledger.ts` — the hash-chained, append-only evidence log and
-  its `verifyChain()` tamper check.
+- `src/policy/engine.ts` — stateful velocity/cumulative rule evaluation
+- `src/ledger/ledger.ts` — hash-chained append-only evidence log + `verifyChain()`
+- `src/mcp/server.ts` — same policy applied transparently to MCP tool calls
 
 ## Next steps toward the fuller MVP
 
-1. Swap `ConsoleApprovalChannel` for a real Slack webhook implementation of
-   the same `ApprovalChannel` interface (roadmap weeks 7-8).
-2. Swap SQLite for Postgres by reimplementing the `Ledger` class against
-   the same method signatures.
-3. Add Streamable HTTP transport alongside stdio for remote MCP clients.
-4. Add the bare console UI (a page listing agents, decisions, pending
-   approvals) called for in roadmap weeks 9-10.
+1. Swap `ConsoleApprovalChannel` / `StderrApprovalChannel` for a real Slack webhook
+2. Swap SQLite for Postgres (same `Ledger` method signatures)
+3. Add Streamable HTTP MCP transport for remote clients
+4. Bare console UI (roadmap weeks 9-10)

@@ -13,7 +13,7 @@
 import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { nanoid } from "nanoid";
-import type { ActionEvent, Decision } from "../types.js";
+import type { ActionEvent, Approval, Decision } from "../types.js";
 
 const GENESIS_HASH = "0".repeat(64);
 
@@ -225,6 +225,67 @@ export class Ledger {
         reason ?? null,
         id,
       );
+  }
+
+  getApproval(id: string): Approval | undefined {
+    const row = this.db.prepare(`SELECT * FROM approvals WHERE id = ?`).get(id) as any;
+    if (!row) return undefined;
+    return {
+      id: row.id,
+      actionEventId: row.action_event_id,
+      approver: row.approver ?? undefined,
+      status: row.status,
+      requestedAt: row.requested_at,
+      decidedAt: row.decided_at ?? undefined,
+      reason: row.reason ?? undefined,
+    };
+  }
+
+  getEvent(id: string): ActionEvent | undefined {
+    const row = this.db
+      .prepare(`SELECT * FROM action_events WHERE id = ?`)
+      .get(id) as any;
+    return row ? rowToEvent(row) : undefined;
+  }
+
+  /**
+   * Out-of-band approval resolution for a separate OS process (e.g. mcp:approve).
+   * Looks up the held event, marks the approval decided, and appends a follow-up
+   * allow/deny event so stateful velocity rules see the human decision.
+   */
+  resolveApprovalOutOfBand(
+    approvalId: string,
+    approver: string,
+    approved: boolean,
+    reason?: string,
+  ): { approval: Approval; event: ActionEvent } {
+    const approval = this.getApproval(approvalId);
+    if (!approval) throw new Error(`Unknown approval id: ${approvalId}`);
+    if (approval.status !== "pending") {
+      throw new Error(`Approval ${approvalId} is already ${approval.status}`);
+    }
+    const held = this.getEvent(approval.actionEventId);
+    if (!held) throw new Error(`Missing action event ${approval.actionEventId}`);
+
+    this.decideApproval(approvalId, approver, approved, reason);
+    const parameters = JSON.parse(held.parametersRedacted) as Record<string, unknown>;
+    const event = this.append({
+      runId: held.runId,
+      agentId: held.agentId,
+      principal: held.principal,
+      toolName: held.toolName,
+      parameters,
+      decision: approved ? "allow" : "deny",
+      policyId: "approval",
+      policyVersion: 1,
+      ruleTriggered: approved ? "human_approval:approved" : "human_approval:rejected",
+      latencyMs: 0,
+      approvalId,
+    });
+    return {
+      approval: this.getApproval(approvalId)!,
+      event,
+    };
   }
 
   close() {
