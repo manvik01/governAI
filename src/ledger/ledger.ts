@@ -172,6 +172,45 @@ export class Ledger {
     return rows.map(rowToEvent);
   }
 
+  /** Returns one action event by id. Used to reconstruct the original
+   * request (agent, tool, parameters) when resolving an approval out of
+   * band — e.g. from a separate approve-cli process that only has an
+   * approval id, not the original call. */
+  getEventById(id: string): ActionEvent | undefined {
+    const row = this.db
+      .prepare(`SELECT * FROM action_events WHERE id = ?`)
+      .get(id) as any | undefined;
+    return row ? rowToEvent(row) : undefined;
+  }
+
+  /** Returns all approvals still awaiting a decision, most recent first. */
+  listPendingApprovals(): Array<{
+    id: string;
+    actionEventId: string;
+    requestedAt: string;
+  }> {
+    const rows = this.db
+      .prepare(
+        `SELECT id, action_event_id, requested_at FROM approvals WHERE status = 'pending' ORDER BY rowid DESC`,
+      )
+      .all() as any[];
+    return rows.map((r) => ({
+      id: r.id,
+      actionEventId: r.action_event_id,
+      requestedAt: r.requested_at,
+    }));
+  }
+
+  /** Returns one approval by id, or undefined if it doesn't exist. */
+  getApproval(id: string):
+    | { id: string; actionEventId: string; status: string }
+    | undefined {
+    const row = this.db
+      .prepare(`SELECT id, action_event_id, status FROM approvals WHERE id = ?`)
+      .get(id) as any | undefined;
+    return row ? { id: row.id, actionEventId: row.action_event_id, status: row.status } : undefined;
+  }
+
   /** Verifies the hash chain is intact. Returns the index of the first break, or -1 if clean. */
   verifyChain(): number {
     const rows = this.db

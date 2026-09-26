@@ -10,12 +10,10 @@
 //   4. The evidence ledger answering an audit question and verifying its
 //      own hash chain has not been tampered with.
 
-import { AgentRegistry } from "../registry/registry.js";
-import { Ledger } from "../ledger/ledger.js";
-import { PolicyEngine, type Policy } from "../policy/engine.js";
-import { Gateway } from "../gateway/gateway.js";
 import { ConsoleApprovalChannel } from "../gateway/approvals.js";
 import type { ActionRequest } from "../types.js";
+import type { Gateway } from "../gateway/gateway.js";
+import { buildDemoWorld } from "./setup.js";
 import { unlinkSync, existsSync } from "node:fs";
 
 const DB_PATH = "./demo-ledger.db";
@@ -24,78 +22,21 @@ async function main() {
   // Fresh ledger each run so the demo is repeatable.
   if (existsSync(DB_PATH)) unlinkSync(DB_PATH);
 
-  const registry = new AgentRegistry();
-  const ledger = new Ledger(DB_PATH);
-  const policyEngine = new PolicyEngine(registry, ledger);
-  const gateway = new Gateway(registry, policyEngine, ledger, new ConsoleApprovalChannel());
-
-  section("1. Register the agent");
-  const agent = registry.register({
-    name: "SupportRefundAgent",
-    purpose: "Issues customer refunds from the support queue",
-    ownerEmail: "manav@example.com",
-    businessUnit: "Customer Success",
-    platform: "custom",
-    modelProvider: "anthropic",
-    modelVersion: "claude-sonnet-5",
-    autonomyDefault: "A2",
-    mode: "enforcement",
-    tools: [
-      {
-        toolName: "issue_refund",
-        reversible: false,
-        dataClasses: ["financial", "customer_pii"],
-      },
-    ],
-  });
+  section("1. Register the agent and its policy");
+  const { registry, ledger, gateway, agent, policy } = buildDemoWorld(
+    DB_PATH,
+    new ConsoleApprovalChannel(),
+  );
   console.log(`Registered agent ${agent.id} (${agent.name})`);
   console.log(`Risk tier: ${agent.riskTier} | Lifecycle: ${agent.lifecycleState}`);
-
-  // Agent touches money + is irreversible -> risk tier "high" -> starts
-  // pending_approval. Security signs off before it can act, same as the
-  // spec's lifecycle rule.
-  registry.approve(agent.id);
-  console.log(`Security approved the agent; lifecycle is now "${registry.get(agent.id)!.lifecycleState}"`);
-
-  section("2. Define the policy for issue_refund");
-  // SGD 200 and below: allow automatically.
-  // Above SGD 200: hold for a human approval.
-  // Cumulative refunds per day capped at SGD 1,000, regardless of individual
-  // amounts — this is the stateful rule a plain per-call check would miss.
-  const policy: Policy = {
-    id: "pol-refund-001",
-    version: 1,
-    toolName: "issue_refund",
-    defaultDecision: "allow",
-    rules: [
-      // Per-call rule evaluated first: anything above SGD 200 needs a human,
-      // regardless of the running total. This is ordinary, stateless policy.
-      {
-        kind: "parameter_threshold",
-        field: "amount",
-        greaterThan: 200,
-        thenDecision: "hold_for_approval",
-        reason: "Refund exceeds SGD 200 auto-approve limit",
-      },
-      // Stateful rule evaluated second, only reached for calls at or below
-      // SGD 200: even small refunds are blocked once the day's approved
-      // total (including anything a human has approved above) would cross
-      // SGD 1,000. A plain per-call check can never see this pattern.
-      {
-        kind: "velocity",
-        windowMinutes: 24 * 60,
-        maxCumulativeField: { field: "amount", max: 1000 },
-        thenDecision: "deny",
-        reason: "Daily cumulative refund limit (SGD 1,000) would be exceeded",
-      },
-    ],
-  };
-  policyEngine.setPolicy(policy);
   console.log(`Policy ${policy.id} v${policy.version} set for tool "issue_refund"`);
   console.log("  Rule 1: refunds > SGD 200 -> hold for approval (per-call)");
   console.log("  Rule 2 (stateful): cumulative approved refunds > SGD 1,000/day -> deny");
+  // buildDemoWorld already registers, risk-tiers, security-approves the
+  // agent, and installs the policy above — see src/demo/setup.ts, which is
+  // shared with the MCP server so both paths govern identically.
 
-  section("3. Run refund requests through the gateway");
+  section("2. Run refund requests through the gateway");
   const runId = "run-" + Date.now();
 
   await runCall(gateway, agent.id, runId, 150, "cust-001"); // -> allow
