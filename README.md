@@ -98,6 +98,49 @@ is the pattern to copy for LangGraph, the OpenAI Agents SDK, or Google ADK:
 none of `src/mcp/server.ts` changes, only how each framework is told to
 connect to it.
 
+## Context layer + multi-agent task graph (no LLM memory)
+
+```bash
+npm run context:demo
+```
+
+This is the piece that answers "govern a whole multi-agent ecosystem,
+without any of the context or decisions living in an LLM's memory." Three
+new modules, same append-only/versioned discipline as the ledger above:
+
+- `src/context/store.ts` — **Context Store**. Every workflow, persona,
+  condition, decision-matrix policy, goal, milestone and timeline event is
+  a versioned row (`ContextStore.upsert`), never a value baked into a
+  prompt. A write never overwrites — it closes the prior version and
+  inserts a new one, so `ContextStore.asOf(entityId, timestamp)` can
+  reconstruct exactly what was true when any past decision was made.
+- `src/context/matrix.ts` — **Decision Matrix evaluator**. Reads
+  `policy`-kind rows fresh from the Context Store and evaluates them
+  against a structured fact bag, first-match-wins — the same pattern as
+  `policy/engine.ts`, generalized beyond refund amounts to any domain
+  (sales routing, ops triage, approval thresholds). An LLM is trusted to
+  turn an ambiguous event into structured facts; it is never trusted to
+  decide the outcome — that's this pure function.
+- `src/orchestration/task-graph.ts` + `master-agent.ts` — **"every agent
+  has its own sub-task, no one works in silos."** `decomposeGoal()` reads
+  a Goal's Workflow out of the Context Store and expands it into one Task
+  row per step, each owned by exactly one sub-agent role, wired by
+  `dependsOn`. A sub-agent only ever sees its own task's scoped `input`;
+  it writes its result back as that task's `output` — into the same
+  storage every other agent and the Master Agent read, not into a private
+  transcript. `summarizeGoal()` is the Master Agent's entire "read the
+  same memory, give a summarized action and output" loop: a deterministic
+  rollup query over tasks/milestones/timeline, never a re-explanation from
+  conversational memory. Kill the process and re-run it from scratch — you
+  get the identical summary, because nothing depended on continuity.
+
+The demo seeds one workflow (qualify → quote → finance review → close, 4
+steps across 3 roles), runs it end to end with simulated sub-agents, and
+prints the Master Agent's rollup. To make a step "real," swap its
+simulated `work()` callback in `src/orchestration/demo.ts` for an actual
+Claude Agent SDK call scoped to that task's `input` — the task graph,
+context store, and decision matrix don't change.
+
 ## Where the differentiator lives
 
 - `src/policy/engine.ts` — the stateful velocity/cumulative rule evaluation.
