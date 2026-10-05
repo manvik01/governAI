@@ -1,3 +1,8 @@
+// DEV ONLY - NO AUTHENTICATION. Anyone who can reach this port can register,
+// approve and suspend agents. For anything beyond a local experiment use the
+// authenticated gateway in secure-server.ts (`npm run server`); this one is
+// kept as `npm run server:dev`.
+//
 // Bare HTTP server exposing the gateway, registry and ledger. This is the
 // "minimal web page lists agents, decisions and open approvals" milestone
 // from the roadmap (weeks 9-10) — deliberately undesigned. It proves the

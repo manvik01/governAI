@@ -169,6 +169,28 @@ Missing usage stays `unresolved`: the estimate stays held, ledger values are
 PRD, with the decisions taken on each gap in the original, is in
 [`docs/prd-governed-token-consumption.md`](docs/prd-governed-token-consumption.md).
 
+## Agent onboarding, authenticated gateway, audit and security monitoring
+
+```bash
+npm test                       # 31 tests across budget and control plane
+GOVERNAI_DB_PATH=./governai.db npm run server   # authenticated gateway on :8787
+docker build -t governai-gateway .              # container (Dockerfile not yet built in CI)
+```
+
+- `src/control/registration.ts` — owner and sub-owner verified against an identity
+  directory, request fitted to an administrator-defined access profile, human security
+  review with a checklist and separation of duties, one-time per-agent credentials.
+- `src/gateway/secure-server.ts` — every route authenticated; agent identity comes from
+  its credential; identical 401 for every failure; rate limits; `/healthz` and `/readyz`;
+  graceful shutdown.
+- `src/control/audit-log.ts` — user and audit streams in one hash-chained log, secrets
+  redacted at write time, JSON-lines SIEM sink, integrity check.
+- `src/control/security-monitor.ts` — seven detection rules writing alerts into the chain.
+
+`npm run server:dev` is the old unauthenticated server, for local experiments only.
+Requirements: [`docs/PRD.md`](docs/PRD.md). Step-by-step prompts for building this in
+Claude Code, Cursor or Google AI Studio: [`docs/build-prompts.md`](docs/build-prompts.md).
+
 ## Where the differentiator lives
 
 - `src/policy/engine.ts` — the stateful velocity/cumulative rule evaluation.

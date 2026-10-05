@@ -7,14 +7,15 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "demo": "npm run build && node dist/demo/scenario.js",
-    "server": "npm run build && node dist/gateway/server.js",
+    "server": "npm run build && node dist/gateway/secure-server.js",
     "mcp:server": "npm run build && node dist/mcp/server.js",
     "mcp:test-client": "npm run build && node dist/mcp/test-client.js",
     "mcp:approve": "npm run build && node dist/mcp/approve.js",
     "agent:claude": "npm run build && node dist/demo/claude-agent-demo.js",
     "context:demo": "npm run build && node dist/orchestration/demo.js",
-    "test": "npm run build && node --test dist/budget/budget.test.js",
-    "budget:demo": "npm run build && node dist/budget/demo.js"
+    "test": "npm run build && node --test --test-force-exit dist/budget/budget.test.js dist/control/control.test.js",
+    "budget:demo": "npm run build && node dist/budget/demo.js",
+    "server:dev": "npm run build && node dist/gateway/server.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.283",

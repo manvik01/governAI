@@ -7,7 +7,17 @@ export type LifecycleState =
   | "pending_approval"
   | "active"
   | "suspended"
+  | "rejected"
   | "retired";
+
+/** Outcome of the human security review required before activation. */
+export interface SecurityReview {
+  status: "pending" | "approved" | "rejected";
+  reviewer?: string;
+  decidedAt?: string;
+  checklist?: Record<string, boolean>;
+  notes?: string;
+}
 
 export type RiskTier = "low" | "medium" | "high" | "critical";
 
@@ -31,6 +41,13 @@ export interface Agent {
   name: string;
   purpose: string;
   ownerEmail: string;
+  /** Deputy accountable owner; must be a different verified person. */
+  subOwnerEmail?: string;
+  /** Administrator-defined ceiling this agent's access was validated against. */
+  accessProfileId?: string;
+  /** Who submitted the registration (owner, or an admin on their behalf). */
+  registeredBy?: string;
+  securityReview?: SecurityReview;
   businessUnit: string;
   platform: string; // e.g. "custom", "copilot-studio", "gemini-enterprise"
   modelProvider: string; // e.g. "anthropic", "openai", "google"
