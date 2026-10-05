@@ -6,6 +6,7 @@
 import { nanoid } from "nanoid";
 import type {
   Agent,
+  BudgetPolicy,
   AutonomyLevel,
   GovernanceMode,
   LifecycleState,
@@ -24,6 +25,10 @@ export interface RegisterAgentInput {
   autonomyDefault: AutonomyLevel;
   mode: GovernanceMode;
   tools: Omit<ToolGrant, "agentId">[];
+  /** Models the agent may call. Defaults to just `modelVersion`. */
+  permittedModels?: string[];
+  /** Required: an agent cannot be registered without a budget policy. */
+  budgetPolicy: BudgetPolicy;
   expiresInDays?: number;
 }
 
@@ -32,6 +37,19 @@ export class AgentRegistry {
   private grants = new Map<string, ToolGrant[]>(); // agentId -> grants
 
   register(input: RegisterAgentInput): Agent {
+    // PRD: every agent has an owner, an approved purpose, permitted models
+    // and a budget policy. Refuse to register one that is missing any.
+    if (!input.ownerEmail?.trim()) throw new Error("Agent registration requires an owner");
+    if (!input.purpose?.trim()) throw new Error("Agent registration requires an approved purpose");
+    if (!input.budgetPolicy) throw new Error("Agent registration requires a budget policy");
+    for (const [k, v] of Object.entries(input.budgetPolicy)) {
+      if (v !== undefined && (!Number.isInteger(v) || v < 0)) {
+        throw new Error(`budgetPolicy.${k} must be a non-negative integer (micro-USD)`);
+      }
+    }
+    const permittedModels = input.permittedModels ?? [input.modelVersion];
+    if (permittedModels.length === 0) throw new Error("Agent registration requires at least one permitted model");
+
     const id = nanoid();
     const now = new Date();
     const expires = new Date(now);
@@ -52,6 +70,8 @@ export class AgentRegistry {
       modelProvider: input.modelProvider,
       modelVersion: input.modelVersion,
       riskTier,
+      permittedModels,
+      budgetPolicy: input.budgetPolicy,
       autonomyDefault: input.autonomyDefault,
       lifecycleState,
       mode: input.mode,

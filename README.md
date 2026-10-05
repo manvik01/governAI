@@ -141,6 +141,34 @@ simulated `work()` callback in `src/orchestration/demo.ts` for an actual
 Claude Agent SDK call scoped to that task's `input` — the task graph,
 context store, and decision matrix don't change.
 
+## Governed token consumption and cost management
+
+```bash
+npm test            # 16 acceptance tests, incl. a cross-process budget race
+npm run budget:demo # parent task -> 3 child agents under one shared budget
+```
+
+Every model call goes through `GovernedModelGateway` (`src/budget/`), in a
+fixed order: agent state -> permitted model -> policy/grant/approval ->
+**budget** -> provider -> reconcile -> bill. Security checks run before the
+budget is read, so available budget can never turn a deny or a human-approval
+hold into an allow, and a denied call never reaches the provider.
+
+- `budget-store.ts` — org/project/agent/root-task budgets, atomic reservation
+  (one write-locked transaction across all levels), reconciliation idempotent
+  on usage-event id, the append-only consumption ledger, authorised increases
+  (separation of duties; touch no permissions), task cancellation.
+- `billing.ts` — provider cost, governance-processing cost and platform fee
+  stored separately; unique idempotency key per request attempt; explicit
+  treatment of failed, retried, blocked and unresolved calls; `trace()` walks
+  a bill back to its usage evidence and pricing snapshot.
+- `pricing.ts` — versioned, snapshotted pricing; integer micro-USD throughout.
+
+Missing usage stays `unresolved`: the estimate stays held, ledger values are
+`NULL` (never 0) and nothing is billed until real usage arrives. The refined
+PRD, with the decisions taken on each gap in the original, is in
+[`docs/prd-governed-token-consumption.md`](docs/prd-governed-token-consumption.md).
+
 ## Where the differentiator lives
 
 - `src/policy/engine.ts` — the stateful velocity/cumulative rule evaluation.

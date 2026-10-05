@@ -41,6 +41,9 @@ export function buildDemoWorld(dbPath: string, approvalChannel: ApprovalChannel)
     modelVersion: "claude-sonnet-5",
     autonomyDefault: "A2",
     mode: "enforcement",
+    permittedModels: ["claude-sonnet-5"],
+    // Budgets are integer micro-USD: $50 cap across this agent, $2 per originating task.
+    budgetPolicy: { agentLimitMicro: 50_000_000, defaultTaskLimitMicro: 2_000_000 },
     tools: [
       {
         toolName: "issue_refund",

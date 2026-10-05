@@ -15,6 +15,17 @@ export type AutonomyLevel = "A0" | "A1" | "A2" | "A3" | "A4";
 
 export type GovernanceMode = "enforcement" | "posture";
 
+/** Per-agent budget policy, set at registration. All amounts are integer
+ * micro-USD (1 USD = 1_000_000) so budget arithmetic never touches floats.
+ * A level left undefined means "no limit at this level from this agent's
+ * policy" — org/project limits set by administrators still apply. */
+export interface BudgetPolicy {
+  /** Cap on everything this agent spends across all tasks. */
+  agentLimitMicro?: number;
+  /** Default cap applied to each new root task this agent originates. */
+  defaultTaskLimitMicro?: number;
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -25,6 +36,10 @@ export interface Agent {
   modelProvider: string; // e.g. "anthropic", "openai", "google"
   modelVersion: string;
   riskTier: RiskTier;
+  /** Models this agent may invoke. A call naming any other model is blocked
+   * before it reaches a provider — including fallback models. */
+  permittedModels: string[];
+  budgetPolicy: BudgetPolicy;
   autonomyDefault: AutonomyLevel;
   lifecycleState: LifecycleState;
   mode: GovernanceMode;
