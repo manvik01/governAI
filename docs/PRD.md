@@ -199,3 +199,31 @@ keys; TLS terminated at the ingress with mTLS to agents where required.
 4. On-premises customers: Kubernetes only, or plain Docker hosts too?
 5. Retention: how long must audit and user logs be kept, and who may export them?
 6. Should the console be a separate product surface or part of the gateway?
+
+## 10. Milestones
+
+Sequenced by one rule: the shortest path to a design partner running real agents through the
+gateway, then the work a second customer needs. Sizes are relative effort for one founder
+using AI coding tools, not commitments.
+
+| # | Milestone | Scope | Exit test | Size |
+|---|---|---|---|---|
+| M0 | Baseline | Reconcile `main` with the Cursor commits; CI running `npm test`; Docker image built, run and scanned | Clean checkout builds, tests pass, container answers `/readyz` | S |
+| M1 | Deployable single node | Bootstrap admin CLI (first user, profile, token); model-call and budget route on the secure gateway; provider keys held by the gateway, never by agents; MCP proxy mode; encrypted backup of the SQLite file | An agent with no provider key completes a model call only through the gateway; a denied call never reaches the provider | M |
+| M2 | Human loop and visibility | Console UI (agents, review queue, audit search, alerts, budgets); Slack or Teams approvals; **shadow mode** (log what policy would have blocked, enforce nothing) | A reviewer registers, approves and suspends an agent without the API; shadow mode runs a week on live traffic without breaking it | M |
+| M3 | Design-partner pilot | One customer, on-premises or their cloud VM, 3 to 5 real agents; weekly review of findings; pricing and metering switched on | Partner keeps it running 30 days; at least one real policy denial and one real budget stop recorded | M |
+| M4 | Scale-out | Async repository layer; Postgres with row locks; Redis counters; single audit writer; autoscaling manifests | N-replica test: no budget over-allocation, intact audit chain, SIGTERM drains cleanly (closes F3 acceptance) | L |
+| M5 | Enterprise identity and evidence | OIDC login, SCIM directory, short-lived agent credentials, OTel/OCSF export, retention and legal-hold rules, tenant isolation | Leaver removed in the IdP loses access within minutes; tenant A cannot read tenant B in a test | L |
+| M6 | Assurance and launch | Independent penetration test; standards mapping verified against current text; SLOs and runbooks; SOC 2 readiness | Pen test has no open high findings; a customer security questionnaire can be answered from the repo | M |
+
+### Requirements this PRD does not yet contain (add before M1)
+
+1. **Bypass prevention.** F2.1 says agents reach models only through the gateway but nothing enforces it. Requirement: provider keys live only in the gateway; deployment guide requires network egress rules that block direct provider access.
+2. **Integration surface.** How an agent is pointed at the gateway: MCP proxy, OpenAI/Anthropic-compatible HTTP endpoint, SDK wrapper. Pick one for the pilot.
+3. **Discovery of unregistered agents.** The 96% versus 12% problem is mostly agents nobody registered. Requirement: detect traffic from unknown credentials or egress logs and open a registration task.
+4. **Shadow mode and policy dry-run.** Customers will not enforce on day one. Policies need versions, a simulate-against-history mode and a staged rollout.
+5. **Tenancy decision.** Single-tenant per deployment for the pilot (simplest, matches the on-premises story) and multi-tenant in M5. State it so the data model is not guessed.
+6. **Content controls.** PII redaction on prompts and responses, prompt-injection signals, output limits. Currently only a reference to OWASP.
+7. **Non-functional targets.** Gateway added latency (p95), availability, log retention, backup and recovery objectives.
+8. **Success metrics.** Share of agent traffic that is governed, time to approve an agent, denied-call rate, unresolved-usage rate, audit verification passing daily.
+9. **Buyer and packaging.** Who signs (security, platform, finance), pricing tiers and what is metered. The research exists in chat; it is not in this document.
