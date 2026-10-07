@@ -5,7 +5,7 @@
 import Database from "better-sqlite3";
 import { AgentRegistry } from "../registry/registry.js";
 import { Ledger } from "../ledger/ledger.js";
-import { PolicyEngine } from "../policy/engine.js";
+import { PolicyEngine, type Policy } from "../policy/engine.js";
 import { Gateway } from "../gateway/gateway.js";
 import { StderrApprovalChannel, type ApprovalChannel } from "../gateway/approvals.js";
 import { AuditLog, JsonLinesSink, type AuditSink } from "./audit-log.js";
@@ -60,8 +60,27 @@ export function buildControlPlane(opts: ControlPlaneOptions) {
   const policyEngine = new PolicyEngine(registry, ledger);
   const gateway = new Gateway(registry, policyEngine, ledger, opts.approvals ?? new StderrApprovalChannel());
 
+  // Policies are durable: a restarted or newly added gateway replica loads the same set.
+  db.exec(`CREATE TABLE IF NOT EXISTS policies (
+    tool_name TEXT PRIMARY KEY, version INTEGER NOT NULL, body TEXT NOT NULL,
+    updated_by TEXT NOT NULL, updated_at TEXT NOT NULL)`);
+  for (const row of db.prepare("SELECT body FROM policies").all() as Array<{ body: string }>) {
+    policyEngine.setPolicy(JSON.parse(row.body) as Policy);
+  }
+  /** Persist and activate a policy. Versions must increase, so history cannot be rolled back silently. */
+  const savePolicy = (policy: Policy, actor: string): { ok: true } | { ok: false; currentVersion: number } => {
+    const current = db.prepare("SELECT version FROM policies WHERE tool_name = ?").get(policy.toolName) as { version: number } | undefined;
+    if (current && policy.version <= current.version) return { ok: false, currentVersion: current.version };
+    db.prepare(`INSERT INTO policies (tool_name, version, body, updated_by, updated_at) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(tool_name) DO UPDATE SET version = excluded.version, body = excluded.body,
+      updated_by = excluded.updated_by, updated_at = excluded.updated_at`)
+      .run(policy.toolName, policy.version, JSON.stringify(policy), actor, (opts.now?.() ?? new Date()).toISOString());
+    policyEngine.setPolicy(policy);
+    return { ok: true };
+  };
+
   return {
-    db, audit, registry, directory, profiles, credentials, registration, monitor, ledger, policyEngine, gateway,
+    db, audit, registry, directory, profiles, credentials, registration, monitor, ledger, policyEngine, gateway, savePolicy,
     close() {
       ledger.close();
       db.close();

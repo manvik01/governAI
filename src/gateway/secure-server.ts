@@ -30,6 +30,7 @@ import { nanoid } from "nanoid";
 import { hasRole, type DirectoryUser, type Role } from "../control/identity.js";
 import type { ControlPlane } from "../control/control-plane.js";
 import type { RegistrationRequest } from "../control/registration.js";
+import { parsePolicy } from "../policy/schema.js";
 
 export interface SecureGatewayOptions {
   /** Max requests per minute per authenticated subject. */
@@ -243,6 +244,30 @@ export function createSecureGateway(cp: ControlPlane, options: SecureGatewayOpti
     const out = cp.registration.rotateCredential(req.params.id, p.email, ctxOf(res));
     if (!out.ok) return void res.status(403).json({ error: "forbidden", violations: out.violations });
     res.json({ credential: { token: out.credential.token, expiresAt: out.credential.expiresAt, note: "shown once; the previous credential is revoked" } });
+  });
+
+  // ---- policies: admin-managed, versioned, durable, every change in the user log
+  app.put("/v1/policies", (req, res) => {
+    const user = requireUser(res, req, "admin");
+    if (!user) return;
+    const parsed = parsePolicy(req.body);
+    if (!parsed.ok) return void res.status(400).json({ error: "bad_request", violations: parsed.errors });
+    const saved = cp.savePolicy(parsed.policy, user.email);
+    cp.audit.append({
+      stream: "user", actorType: "user", actorId: user.email, action: "policy.set", targetType: "policy", targetId: parsed.policy.toolName,
+      outcome: saved.ok ? "success" : "denied", sourceIp: L(res).ip, requestId: L(res).requestId,
+      details: { policyId: parsed.policy.id, version: parsed.policy.version, ...(saved.ok ? {} : { currentVersion: saved.currentVersion }) },
+    });
+    if (!saved.ok) return void res.status(409).json({ error: "version_conflict", currentVersion: saved.currentVersion });
+    res.json({ toolName: parsed.policy.toolName, version: parsed.policy.version });
+  });
+
+  app.get("/v1/policies/:toolName", (req, res) => {
+    const user = requireUser(res, req, "admin", "auditor");
+    if (!user) return;
+    const policy = cp.policyEngine.getPolicy(req.params.toolName);
+    if (!policy) return void res.status(404).json({ error: "not_found" });
+    res.json({ policy });
   });
 
   // ---- audit and security (read access is itself logged to the user stream)
