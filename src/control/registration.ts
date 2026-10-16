@@ -212,6 +212,11 @@ export class RegistrationService {
     return count;
   }
 
+  /** Revokes every credential of an agent (audited). Used by discovery's disable. */
+  revokeAgentCredentials(agentId: string, reason: string, ctx: Ctx = {}) {
+    return this.revokeCredentials(agentId, reason, ctx);
+  }
+
   /** Expiry requested by the caller, validated: future, within the maximum. */
   private expiryViolations(req: { expiresAt?: string; expiresInDays?: number }): string[] {
     const v: string[] = [];
@@ -566,6 +571,15 @@ export class RegistrationService {
     if (updated.lifecycleState === "suspended") {
       updated = this.registry.transition(agentId, "active", by, "recertified after expiry");
       credential = this.issueCredential(agentId, "recertification", ctx);
+    } else {
+      // Credential lifetime follows certification: no forced rotation on recertify.
+      const extended = this.credentials.extendAgentCredentials(agentId, expiresAt);
+      if (extended) {
+        this.audit.append({
+          stream: "audit", actorType: "system", actorId: "registration-service", action: "credential.extend", targetType: "agent", targetId: agentId,
+          outcome: "success", sourceIp: ctx.sourceIp, requestId: ctx.requestId, details: { count: extended, expiresAt, via: "recertification" },
+        });
+      }
     }
     this.audit.append({
       stream: "user", actorType: "user", actorId: by, action: "agent.recertify", targetType: "agent", targetId: agentId,

@@ -24,6 +24,18 @@
 //   - Body size limits, rate limiting by source (pre-auth) and subject
 //     (post-auth), and an audit event for every request outcome, including
 //     failures and denials.
+//
+// Phase 1 (registration and discovery):
+//   - A call with an unknown, failed, revoked or expired AGENT credential is
+//     also recorded as a discovery sighting ("possible unregistered agent"),
+//     fingerprinted from source address, user agent and the public key-id
+//     prefix only. The presented token never reaches discovery or the log.
+//   - An agent past its expiry date is refused at authentication even if
+//     the expiry sweep has not run yet (reason "agent_expired", same 401).
+//   - Routes for drafts, updates, registration as code (apply), lifecycle
+//     transitions, risk tier, recertification, the discovery triage queue,
+//     egress-log import and connector status. See
+//     docs/phase1-registration-discovery.md.
 
 import "../config/env-compat.js";
 import express, { type NextFunction, type Request, type Response } from "express";
@@ -32,6 +44,26 @@ import { hasRole, type DirectoryUser, type Role } from "../control/identity.js";
 import type { ControlPlane } from "../control/control-plane.js";
 import type { RegistrationRequest } from "../control/registration.js";
 import { parsePolicy } from "../policy/schema.js";
+import { LLM_KEY_PATTERNS } from "../control/secret-patterns.js";
+import { DISCOVERY_STATUSES, type DiscoveryStatus } from "../discovery/discovery.js";
+import type { LifecycleState, RiskTier } from "../types.js";
+
+/** Non-secret description of a presented credential, for discovery fingerprints. */
+export function credentialShape(token: string | undefined): { scheme: string; keyIdPrefix?: string; provider?: string } {
+  if (!token) return { scheme: "none" };
+  const parts = token.split(".");
+  if (parts[0] === "gai" && (parts[1] === "a" || parts[1] === "u") && parts[2]) {
+    return { scheme: parts[1] === "a" ? "zenai4-agent" : "zenai4-user", keyIdPrefix: parts[2].slice(0, 6) };
+  }
+  const p = LLM_KEY_PATTERNS.find((k) => new RegExp(`^${k.re.source}$`).test(token));
+  if (p) return { scheme: "provider-key", provider: p.provider };
+  return { scheme: "opaque" };
+}
+
+const FORBIDDEN_HINT = /^(only |not permitted|separation of duties|reviewer must)/;
+const statusFor = (violations: string[], notFound?: boolean) =>
+  notFound || violations.some((v) => v.startsWith("unknown agent") || v.startsWith("unknown discovery")) ? 404
+    : violations.some((v) => FORBIDDEN_HINT.test(v)) ? 403 : 422;
 
 export interface SecureGatewayOptions {
   /** Max requests per minute per authenticated subject. */
@@ -39,6 +71,8 @@ export interface SecureGatewayOptions {
   /** Max requests per minute per source address, checked before authentication. */
   ipRateLimitPerMin?: number;
   maxBodyBytes?: number;
+  /** Max size of an egress-log CSV import (default 5 MiB). */
+  maxCsvBytes?: number;
   /** Trust X-Forwarded-For (only behind a proxy/load balancer you control). */
   trustProxy?: boolean;
 }
@@ -97,6 +131,9 @@ export function createSecureGateway(cp: ControlPlane, options: SecureGatewayOpti
 
   // ---- body parsing with a hard size cap; malformed input is evidence
   app.use(express.json({ limit: options.maxBodyBytes ?? 64 * 1024 }));
+  // agent.yaml manifests and egress CSVs may be posted raw.
+  app.use(express.text({ type: ["application/yaml", "application/x-yaml", "text/yaml"], limit: options.maxBodyBytes ?? 64 * 1024 }));
+  app.use(express.text({ type: ["text/csv"], limit: options.maxCsvBytes ?? 5 * 1024 * 1024 }));
   app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     if (!err) return next();
     cp.audit.append({
@@ -127,7 +164,28 @@ export function createSecureGateway(cp: ControlPlane, options: SecureGatewayOpti
         stream: "audit", actorType: "anonymous", actorId: subject ?? "unknown", action: "auth.failed", outcome: "denied",
         sourceIp: ctx.ip, requestId: ctx.requestId, details: { reason, subject, path: req.path, method: req.method },
       });
+      noteUnregistered(reason, subject);
       res.status(401).json({ error: "unauthorized" }); // identical for every reason
+    };
+    // Possible unregistered agent: anything that is not a human token, except
+    // a bare unauthenticated request to a non-agent route (that is just noise).
+    const noteUnregistered = (reason: string, subject?: string) => {
+      const shape = credentialShape(token);
+      if (shape.scheme === "zenai4-user" || reason === "user_inactive") return;
+      if (shape.scheme === "none" && req.path !== "/v1/call") return;
+      const ua = String(req.headers["user-agent"] ?? "").slice(0, 200);
+      const linked = subject && cp.registry.get(subject) ? subject : undefined;
+      try {
+        cp.discovery.record({
+          source: "gateway", kind: "failed_credential",
+          identity: [ctx.ip, ua, shape.scheme, shape.keyIdPrefix ?? shape.provider ?? ""],
+          displayName: `${shape.scheme} caller from ${ctx.ip}${ua ? ` (${ua.slice(0, 60)})` : ""}`,
+          agentId: linked,
+          attributes: { sourceIp: ctx.ip, userAgent: ua, credentialScheme: shape.scheme, keyIdPrefix: shape.keyIdPrefix, provider: shape.provider, lastReason: reason, lastPath: req.path },
+        }, { sourceIp: ctx.ip, requestId: ctx.requestId });
+      } catch {
+        /* discovery must never break the authentication path */
+      }
     };
 
     if (!token) return fail("missing_credentials");
@@ -135,6 +193,8 @@ export function createSecureGateway(cp: ControlPlane, options: SecureGatewayOpti
     if (!v.ok) return fail(v.reason, v.subject);
 
     if (v.kind === "agent") {
+      const agent = cp.registry.get(v.subject);
+      if (agent?.lifecycleState === "active" && cp.registry.isExpired(agent)) return fail("agent_expired", v.subject);
       if (!cp.registry.isActive(v.subject)) return fail("agent_not_active", v.subject);
       ctx.principal = { kind: "agent", agentId: v.subject };
     } else {
@@ -200,9 +260,16 @@ export function createSecureGateway(cp: ControlPlane, options: SecureGatewayOpti
   app.post("/v1/agents", (req, res) => {
     const user = requireUser(res, req, "agent_owner", "admin");
     if (!user) return;
+    if (req.body?.draft === true) {
+      const { draft: _d, ...rest } = req.body;
+      const d = cp.registration.createDraft({ ...rest, ownerEmail: String(rest.ownerEmail ?? user.email) }, user.email, ctxOf(res));
+      if (!d.ok) return void res.status(statusFor(d.violations)).json({ error: "validation_failed", violations: d.violations });
+      return void res.status(201).json({ agentId: d.agent.id, lifecycleState: d.agent.lifecycleState, riskTier: d.agent.riskTier, expiresAt: d.agent.expiresAt });
+    }
     const out = cp.registration.submit(req.body as RegistrationRequest, user.email, ctxOf(res));
     if (!out.ok) return void res.status(422).json({ error: "validation_failed", violations: out.violations });
     res.status(201).json({
+      expiresAt: out.agent.expiresAt,
       agentId: out.agent.id, lifecycleState: out.agent.lifecycleState, riskTier: out.agent.riskTier, needsReview: out.needsReview,
       credential: out.credential ? { token: out.credential.token, expiresAt: out.credential.expiresAt, note: "shown once - store it now" } : undefined,
     });
@@ -215,7 +282,177 @@ export function createSecureGateway(cp: ControlPlane, options: SecureGatewayOpti
     if (!all && !hasRole(p.user, "agent_owner")) return void requireUser(res, req, "admin");
     const mine = (e?: string) => e?.toLowerCase() === p.email;
     const agents = cp.registry.list().filter((a) => all || mine(a.ownerEmail) || mine(a.subOwnerEmail));
-    res.json({ agents: agents.map((a) => ({ id: a.id, name: a.name, owner: a.ownerEmail, subOwner: a.subOwnerEmail, lifecycleState: a.lifecycleState, riskTier: a.riskTier, accessProfileId: a.accessProfileId })) });
+    res.json({ agents: agents.map((a) => ({ id: a.id, name: a.name, owner: a.ownerEmail, subOwner: a.subOwnerEmail, lifecycleState: a.lifecycleState, riskTier: a.riskTier, computedRiskTier: a.computedRiskTier ?? a.riskTier, accessProfileId: a.accessProfileId, expiresAt: a.expiresAt, manifestId: a.manifestId })) });
+  });
+
+  // ---- registration as code: idempotent apply of an agent.yaml manifest
+  app.post("/v1/agents/apply", (req, res) => {
+    const user = requireUser(res, req, "agent_owner", "admin", "ci_registrar");
+    if (!user) return;
+    const body = req.body;
+    const out = typeof body === "string" ? cp.manifests.applyText(body, user.email, ctxOf(res))
+      : typeof body?.manifest === "string" ? cp.manifests.applyText(body.manifest, user.email, ctxOf(res))
+      : cp.manifests.applyObject(body, user.email, ctxOf(res));
+    if (!out.ok) return void res.status(statusFor(out.violations)).json({ error: "validation_failed", violations: out.violations });
+    res.status(out.action === "created" || out.action === "drafted" ? 201 : 200).json({
+      action: out.action, agentId: out.agent.id, lifecycleState: out.agent.lifecycleState, riskTier: out.agent.riskTier,
+      expiresAt: out.agent.expiresAt, widened: out.widened, reReview: out.reReview, missing: out.missing,
+      note: out.agent.lifecycleState === "active" && out.action === "created" ? "no credential is issued by apply; the owner rotates one via POST /v1/agents/:id/credentials/rotate" : undefined,
+    });
+  });
+
+  app.get("/v1/agents/expiring", (req, res) => {
+    const p = L(res).principal;
+    if (p?.kind !== "user") return void res.status(403).json({ error: "forbidden" });
+    const all = hasRole(p.user, "admin", "auditor", "security_reviewer");
+    if (!all && !hasRole(p.user, "agent_owner")) return void requireUser(res, req, "admin");
+    const days = Math.min(Math.max(Number(req.query.days) || 14, 1), 365);
+    const mine = (e?: string) => e?.toLowerCase() === p.email;
+    const agents = cp.registration.expiringWithin(days).filter((a) => all || mine(a.ownerEmail) || mine(a.subOwnerEmail));
+    res.json({ days, agents: agents.map((a) => ({ id: a.id, name: a.name, owner: a.ownerEmail, subOwner: a.subOwnerEmail, expiresAt: a.expiresAt, riskTier: a.riskTier })) });
+  });
+
+  app.get("/v1/agents/:id", (req, res) => {
+    const p = L(res).principal;
+    if (p?.kind !== "user") return void res.status(403).json({ error: "forbidden" });
+    const a = cp.registry.get(req.params.id);
+    const mine = (e?: string) => e?.toLowerCase() === p.email;
+    if (!a || !(hasRole(p.user, "admin", "auditor", "security_reviewer") || mine(a.ownerEmail) || mine(a.subOwnerEmail))) {
+      return void res.status(404).json({ error: "not_found" });
+    }
+    res.json({ agent: a, tools: cp.registry.grantsFor(a.id).map(({ agentId: _x, ...t }) => t) });
+  });
+
+  app.patch("/v1/agents/:id", (req, res) => {
+    const user = requireUser(res, req, "agent_owner", "admin");
+    if (!user) return;
+    const out = cp.registration.updateRegistration(req.params.id, (req.body ?? {}) as Partial<RegistrationRequest>, user.email, ctxOf(res));
+    if (!out.ok) return void res.status(statusFor(out.violations)).json({ error: "validation_failed", violations: out.violations });
+    res.json({ agentId: out.agent.id, lifecycleState: out.agent.lifecycleState, riskTier: out.agent.riskTier, widened: out.widened, reReview: out.reReview });
+  });
+
+  app.post("/v1/agents/:id/submit", (req, res) => {
+    const user = requireUser(res, req, "agent_owner", "admin");
+    if (!user) return;
+    const out = cp.registration.submitDraft(req.params.id, user.email, ctxOf(res));
+    if (!out.ok) return void res.status(statusFor(out.violations)).json({ error: "validation_failed", violations: out.violations });
+    res.json({
+      agentId: out.agent.id, lifecycleState: out.agent.lifecycleState, riskTier: out.agent.riskTier, needsReview: out.needsReview, expiresAt: out.agent.expiresAt,
+      credential: out.credential ? { token: out.credential.token, expiresAt: out.credential.expiresAt, note: "shown once - store it now" } : undefined,
+    });
+  });
+
+  app.post("/v1/agents/:id/transition", (req, res) => {
+    const p = L(res).principal;
+    if (p?.kind !== "user") return void res.status(403).json({ error: "forbidden" });
+    const to = String(req.body?.to ?? "") as LifecycleState;
+    if (!["draft", "pending_approval", "active", "suspended", "rejected", "retired"].includes(to)) {
+      return void res.status(400).json({ error: "bad_request", detail: "to must be a lifecycle state" });
+    }
+    const out = cp.registration.transition(req.params.id, to, p.email, req.body?.reason, ctxOf(res));
+    if (!out.ok) return void res.status(statusFor(out.violations)).json({ error: "validation_failed", violations: out.violations });
+    res.json({
+      agentId: out.agent.id, lifecycleState: out.agent.lifecycleState,
+      credential: out.credential ? { token: out.credential.token, expiresAt: out.credential.expiresAt, note: "shown once - store it now" } : undefined,
+    });
+  });
+
+  app.post("/v1/agents/:id/retire", (req, res) => {
+    const p = L(res).principal;
+    if (p?.kind !== "user") return void res.status(403).json({ error: "forbidden" });
+    const out = cp.registration.retire(req.params.id, p.email, String(req.body?.reason ?? "retired via API"), ctxOf(res));
+    if (!out.ok) return void res.status(statusFor(out.violations)).json({ error: "validation_failed", violations: out.violations });
+    res.json({ agentId: out.agent.id, lifecycleState: out.agent.lifecycleState });
+  });
+
+  app.post("/v1/agents/:id/risk-tier", (req, res) => {
+    const p = L(res).principal;
+    if (p?.kind !== "user") return void res.status(403).json({ error: "forbidden" });
+    const tier = String(req.body?.tier ?? "") as RiskTier;
+    const out = cp.registration.setRiskTier(req.params.id, tier, p.email, req.body?.reason, ctxOf(res));
+    if (!out.ok) return void res.status(statusFor(out.violations)).json({ error: "validation_failed", violations: out.violations });
+    res.json({ agentId: out.agent.id, riskTier: out.agent.riskTier, computedRiskTier: out.agent.computedRiskTier, override: out.agent.riskOverride, lifecycleState: out.agent.lifecycleState });
+  });
+
+  app.post("/v1/agents/:id/recertify", (req, res) => {
+    const p = L(res).principal;
+    if (p?.kind !== "user") return void res.status(403).json({ error: "forbidden" });
+    const out = cp.registration.recertify(req.params.id, p.email, ctxOf(res));
+    if (!out.ok) return void res.status(statusFor(out.violations)).json({ error: "validation_failed", violations: out.violations });
+    res.json({
+      agentId: out.agent.id, lifecycleState: out.agent.lifecycleState, expiresAt: out.agent.expiresAt,
+      credential: out.credential ? { token: out.credential.token, expiresAt: out.credential.expiresAt, note: "shown once - the agent was reactivated" } : undefined,
+    });
+  });
+
+  // ---- discovery: the shadow-agent triage queue
+  app.get("/v1/discovery", (req, res) => {
+    const user = requireUser(res, req, "security_reviewer", "admin", "auditor", "agent_owner");
+    if (!user) return;
+    const status = DISCOVERY_STATUSES.includes(req.query.status as DiscoveryStatus) ? (req.query.status as DiscoveryStatus) : undefined;
+    const items = cp.discovery.list({
+      status, source: typeof req.query.source === "string" ? req.query.source : undefined,
+      queue: req.query.queue === "triage" ? "triage" : undefined, limit: Number(req.query.limit) || 200,
+    });
+    res.json({ items });
+  });
+
+  app.post("/v1/discovery/import-egress", (req, res) => {
+    const user = requireUser(res, req, "security_reviewer", "admin");
+    if (!user) return;
+    const csv = typeof req.body === "string" ? req.body : typeof req.body?.csv === "string" ? req.body.csv : undefined;
+    if (!csv) return void res.status(400).json({ error: "bad_request", detail: "send text/csv, or JSON {\"csv\": \"...\"}" });
+    const out = cp.discovery.importEgressCsv(csv, user.email, ctxOf(res));
+    if (!out.ok) return void res.status(statusFor(out.violations)).json({ error: "validation_failed", violations: out.violations });
+    const { ok: _ok, ...summary } = out;
+    res.json(summary);
+  });
+
+  app.get("/v1/discovery/connectors", (req, res) => {
+    const user = requireUser(res, req, "security_reviewer", "admin", "auditor");
+    if (!user) return;
+    res.json({ jobs: cp.scheduler.status() });
+  });
+
+  app.post("/v1/discovery/connectors/:id/run", async (req, res) => {
+    const user = requireUser(res, req, "security_reviewer", "admin");
+    if (!user) return;
+    const jobId = cp.scheduler.jobIds().find((j) => j === req.params.id || j === `connector:${req.params.id}`);
+    if (!jobId) return void res.status(404).json({ error: "not_found" });
+    cp.audit.append({ stream: "user", actorType: "user", actorId: user.email, action: "discovery.run_requested", targetType: "job", targetId: jobId, outcome: "success", sourceIp: L(res).ip, requestId: L(res).requestId });
+    res.json({ run: await cp.scheduler.runOnce(jobId) });
+  });
+
+  app.post("/v1/discovery/:id/claim", (req, res) => {
+    const user = requireUser(res, req, "agent_owner");
+    if (!user) return;
+    const out = cp.discovery.claim(req.params.id, user.email, ctxOf(res));
+    if (!out.ok) return void res.status(statusFor(out.violations, out.notFound)).json({ error: "validation_failed", violations: out.violations });
+    res.status(201).json({ discovery: out.item, agentId: out.agent.id, lifecycleState: out.agent.lifecycleState, owner: out.agent.ownerEmail });
+  });
+
+  app.post("/v1/discovery/:id/assign-owner", (req, res) => {
+    const user = requireUser(res, req, "security_reviewer", "admin");
+    if (!user) return;
+    const out = cp.discovery.assignOwner(req.params.id, String(req.body?.ownerEmail ?? ""), user.email, ctxOf(res));
+    if (!out.ok) return void res.status(statusFor(out.violations, out.notFound)).json({ error: "validation_failed", violations: out.violations });
+    res.json({ discovery: out.item, agentId: out.agent.id, lifecycleState: out.agent.lifecycleState, owner: out.agent.ownerEmail });
+  });
+
+  app.post("/v1/discovery/:id/ignore", (req, res) => {
+    const user = requireUser(res, req, "security_reviewer", "admin");
+    if (!user) return;
+    const out = cp.discovery.ignore(req.params.id, user.email, req.body?.reason, ctxOf(res));
+    if (!out.ok) return void res.status(statusFor(out.violations, out.notFound)).json({ error: "validation_failed", violations: out.violations });
+    res.json({ discovery: out.item });
+  });
+
+  app.post("/v1/discovery/:id/disable", (req, res) => {
+    const user = requireUser(res, req, "security_reviewer", "admin");
+    if (!user) return;
+    const out = cp.discovery.disable(req.params.id, user.email, req.body?.reason, ctxOf(res));
+    if (!out.ok) return void res.status(statusFor(out.violations, out.notFound)).json({ error: "validation_failed", violations: out.violations });
+    res.json({ discovery: out.item, agentId: out.agent?.id, agentState: out.agent?.lifecycleState, manualActionRequired: out.manualActionRequired });
   });
 
   app.post("/v1/agents/:id/review", (req, res) => {
@@ -309,10 +546,17 @@ export function createSecureGateway(cp: ControlPlane, options: SecureGatewayOpti
 
 // ---- process entry point: configuration from the environment ------------
 // ZENAI4_DB_PATH, ZENAI4_SIEM_PATH, PORT, TRUST_PROXY=1, RATE_LIMIT_PER_MIN
+// ZENAI4_SCHEDULER=1 starts discovery connectors (ZENAI4_DISCOVERY_CONNECTORS)
+// and the expiry sweep in this process - run it in ONE replica only.
 // Users and profiles are provisioned out of band (directory sync / admin tooling).
 if (import.meta.url === `file://${process.argv[1]}`) {
   const { buildControlPlane } = await import("../control/control-plane.js");
-  const cp = buildControlPlane({ dbPath: process.env.ZENAI4_DB_PATH ?? "./zenai4.db", siemPath: process.env.ZENAI4_SIEM_PATH });
+  const { connectorsFromEnv } = await import("../discovery/connectors.js");
+  const cp = buildControlPlane({
+    dbPath: process.env.ZENAI4_DB_PATH ?? "./zenai4.db", siemPath: process.env.ZENAI4_SIEM_PATH,
+    connectors: process.env.ZENAI4_SCHEDULER === "1" ? connectorsFromEnv() : [],
+  });
+  if (process.env.ZENAI4_SCHEDULER === "1") cp.scheduler.start();
   const app = createSecureGateway(cp, {
     trustProxy: process.env.TRUST_PROXY === "1",
     rateLimitPerMin: process.env.RATE_LIMIT_PER_MIN ? Number(process.env.RATE_LIMIT_PER_MIN) : undefined,

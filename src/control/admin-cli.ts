@@ -16,6 +16,22 @@
 //   zenai4-admin backup --out /backups/zenai4.bak      (needs ZENAI4_BACKUP_KEY)
 //   zenai4-admin restore --in /backups/zenai4.bak --to /data/restored.db
 //
+// Phase 1 (registration and discovery) - commands that act for a person take
+// --as <email>: that directory user's roles and separation-of-duties rules
+// apply exactly as on the HTTP API, and the audit entry records both the
+// person and the OS operator.
+//   zenai4-admin apply -f agent.yaml --as owner@acme.com
+//       (or, with ZENAI4_URL + ZENAI4_TOKEN set, POSTs to the gateway - CI mode)
+//   zenai4-admin agent register --as <e> --name .. --purpose .. --owner .. --sub-owner .. --profile ..
+//       --business-unit .. --platform .. --model-provider .. --model-version .. --autonomy A1
+//       --tools name:reversible|irreversible:dc1+dc2,... [--data-classes ..] [--expires-at 2027-01-01] [--draft]
+//   zenai4-admin agent list | show --id | submit --id --as | transition --id --to --as | retire --id --as
+//   zenai4-admin agent risk-tier --id --tier high [--reason ..] --as | recertify --id --as | expiring [--days 14]
+//   zenai4-admin discovery list [--status new] [--triage] | claim --id --as | assign-owner --id --owner --as
+//   zenai4-admin discovery ignore --id --reason --as | disable --id [--reason] --as
+//   zenai4-admin discovery import-egress --file egress.csv --as | run [--connector id] | status
+//   zenai4-admin sweep                                    run the expiry sweep now
+//
 // Reads ZENAI4_DB_PATH (default ./zenai4.db). Exit codes: 0 ok, 1 failure, 2 usage.
 
 import "../config/env-compat.js";
@@ -28,6 +44,10 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { buildControlPlane, DEFAULT_PROFILES, type ControlPlane } from "./control-plane.js";
 import type { Role } from "./identity.js";
 import type { AccessProfile } from "./access-profiles.js";
+import type { RegistrationRequest } from "./registration.js";
+import { connectorsFromEnv } from "../discovery/connectors.js";
+import { DISCOVERY_STATUSES, type DiscoveryStatus } from "../discovery/discovery.js";
+import type { LifecycleState, RiskTier, ToolGrant } from "../types.js";
 
 const ROLES: Role[] = ["admin", "security_reviewer", "budget_admin", "auditor", "agent_owner", "ci_registrar"];
 const AUTONOMY = ["A0", "A1", "A2", "A3", "A4"];
@@ -46,6 +66,29 @@ const HELP = `zenai4-admin - operator CLI (reads ZENAI4_DB_PATH)
   audit export [--out <file.jsonl>]
   backup --out <file>                                        encrypted; needs ZENAI4_BACKUP_KEY
   restore --in <file> --to <new.db>                          decrypts, then verifies integrity
+
+Registration and discovery (--as <email> = the person acting; their roles apply):
+  apply -f <agent.yaml> --as <e>                             create / update / no-op by metadata.id
+        (remote: set ZENAI4_URL and ZENAI4_TOKEN; --as is then the token's user)
+  agent register --as <e> --name <n> --purpose <p> --owner <e> --sub-owner <e> --profile <id>
+        --business-unit <bu> --platform <p> --model-provider <p> --model-version <m> --autonomy <A0-A4>
+        --tools <name:reversible|irreversible[:dc1+dc2],...> [--data-classes <dc,..>] [--models <m,..>]
+        [--expires-at <date>] [--mode enforcement|posture] [--draft]
+  agent list | agent show --id <id> | agent expiring [--days 14]
+  agent submit --id <id> --as <e>                            draft -> pending approval
+  agent transition --id <id> --to <state> [--reason <r>] --as <e>
+  agent retire --id <id> [--reason <r>] --as <e>             terminal; revokes credentials
+  agent risk-tier --id <id> --tier <low|medium|high|critical> [--reason <r>] --as <e>
+  agent recertify --id <id> --as <e>                         extends expiry by 90 days
+  discovery list [--status <s>] [--triage] [--source <s>]
+  discovery claim --id <id> --as <e>                         creates a draft owned by <e>
+  discovery assign-owner --id <id> --owner <e> --as <e>      security/admin only
+  discovery ignore --id <id> --reason <r> --as <e>
+  discovery disable --id <id> [--reason <r>] --as <e>        suspends a linked agent, revokes credentials
+  discovery import-egress --file <egress.csv> --as <e>
+  discovery run [--connector <id>]                           runs connectors from ZENAI4_DISCOVERY_CONNECTORS now
+  discovery status
+  sweep                                                      expiry sweep now
 
 Exit codes: 0 ok, 1 failure, 2 usage error.
 `;
@@ -97,23 +140,31 @@ async function run(argv: string[]): Promise<number> {
     process.stdout.write(HELP);
     return group ? 0 : 2;
   }
-  const flagArgs = ["init", "backup", "restore"].includes(group) ? [sub, ...rest].filter((x) => x !== undefined) : rest;
+  const flagArgs = ["init", "backup", "restore", "apply", "sweep"].includes(group) ? [sub, ...rest].filter((x) => x !== undefined) : rest;
   const { values } = parseArgs({
     args: flagArgs,
     options: {
       "admin-email": { type: "string" }, "admin-name": { type: "string" }, email: { type: "string" }, name: { type: "string" },
       roles: { type: "string" }, "ttl-hours": { type: "string" }, file: { type: "string" }, out: { type: "string" },
       in: { type: "string" }, to: { type: "string" },
+      f: { type: "string", short: "f" }, as: { type: "string" }, id: { type: "string" }, purpose: { type: "string" },
+      owner: { type: "string" }, "sub-owner": { type: "string" }, profile: { type: "string" }, "business-unit": { type: "string" },
+      platform: { type: "string" }, "model-provider": { type: "string" }, "model-version": { type: "string" }, models: { type: "string" },
+      autonomy: { type: "string" }, tools: { type: "string" }, "data-classes": { type: "string" }, "expires-at": { type: "string" },
+      mode: { type: "string" }, draft: { type: "boolean" }, tier: { type: "string" }, reason: { type: "string" }, days: { type: "string" },
+      status: { type: "string" }, triage: { type: "boolean" }, source: { type: "string" }, connector: { type: "string" },
+      "agent-limit-micro": { type: "string" }, "task-limit-micro": { type: "string" },
     },
     strict: true,
   });
 
   if (group === "restore") return restore(need(values.in, "in"), need(values.to, "to"));
+  if (group === "apply" && process.env.ZENAI4_URL) return applyRemote(need(values.f ?? values.file, "f"));
 
   const dbPath = process.env.ZENAI4_DB_PATH ?? "./zenai4.db";
   const cp = buildControlPlane({ dbPath, siemPath: process.env.ZENAI4_SIEM_PATH });
   try {
-    switch (`${group}${["init", "backup"].includes(group) ? "" : " " + (sub ?? "")}`) {
+    switch (`${group}${["init", "backup", "apply", "sweep"].includes(group) ? "" : " " + (sub ?? "")}`) {
       case "init": {
         const email = need(values["admin-email"], "admin-email").toLowerCase();
         const name = need(values["admin-name"], "admin-name");
@@ -209,12 +260,190 @@ async function run(argv: string[]): Promise<number> {
         process.stderr.write(`Encrypted backup written to ${out} (${plain.length} bytes before encryption).\n`);
         return 0;
       }
+      case "apply": {
+        const file = need(values.f ?? values.file, "f");
+        const as = actingAs(cp, values.as);
+        let text: string;
+        try { text = readFileSync(file, "utf8"); } catch { throw new CliError(`cannot read ${file}`); }
+        const out = cp.manifests.applyText(text, as, { requestId: operator() });
+        log(cp, "cli.apply", out.ok ? "success" : "denied", { as, file, result: out.ok ? out.action : undefined, violations: out.ok ? undefined : out.violations }, out.ok ? out.agent.id : undefined);
+        if (!out.ok) return fail(out.violations);
+        process.stdout.write(`${out.action} ${out.agent.id} state=${out.agent.lifecycleState} tier=${out.agent.riskTier}${out.reReview ? " (re-review required)" : ""}${out.missing?.length ? ` missing=${out.missing.join(",")}` : ""}\n`);
+        return 0;
+      }
+      case "agent register": {
+        const as = actingAs(cp, values.as);
+        const req = registrationFromFlags(values);
+        if (values.draft) {
+          const d = cp.registration.createDraft({ ...req, ownerEmail: req.ownerEmail ?? as }, as, { requestId: operator() });
+          log(cp, "cli.agent.register", d.ok ? "success" : "denied", { as, draft: true, violations: d.ok ? undefined : d.violations }, d.ok ? d.agent.id : undefined);
+          if (!d.ok) return fail(d.violations);
+          process.stdout.write(`${d.agent.id} draft\n`);
+          return 0;
+        }
+        const out = cp.registration.submit(req as RegistrationRequest, as, { requestId: operator() });
+        log(cp, "cli.agent.register", out.ok ? "success" : "denied", { as, violations: out.ok ? undefined : out.violations }, out.ok ? out.agent.id : undefined);
+        if (!out.ok) return fail(out.violations);
+        process.stderr.write(`Registered ${out.agent.id}: ${out.agent.lifecycleState}, risk ${out.agent.riskTier}, expires ${out.agent.expiresAt}\n`);
+        if (out.credential) { process.stderr.write(`Agent credential (shown once, expires ${out.credential.expiresAt}):\n`); process.stdout.write(out.credential.token + "\n"); }
+        else process.stdout.write(`${out.agent.id}\n`);
+        return 0;
+      }
+      case "agent list": {
+        for (const a of cp.registry.list()) process.stdout.write(`${a.id}  ${a.lifecycleState.padEnd(16)} ${a.riskTier.padEnd(8)} expires=${a.expiresAt.slice(0, 10)}  ${a.name}  owner=${a.ownerEmail}${a.manifestId ? `  manifest=${a.manifestId}` : ""}\n`);
+        return 0;
+      }
+      case "agent show": {
+        const a = cp.registry.get(need(values.id, "id"));
+        if (!a) throw new CliError("no such agent");
+        process.stdout.write(JSON.stringify({ ...a, tools: cp.registry.grantsFor(a.id).map(({ agentId: _x, ...t }) => t) }, null, 2) + "\n");
+        return 0;
+      }
+      case "agent expiring": {
+        const days = values.days ? Number(values.days) : 14;
+        if (!Number.isFinite(days) || days <= 0) throw new UsageError("--days must be a positive number");
+        for (const a of cp.registration.expiringWithin(days)) process.stdout.write(`${a.id}  expires=${a.expiresAt}  ${a.name}  owner=${a.ownerEmail}\n`);
+        return 0;
+      }
+      case "agent submit": return result(cp, "cli.agent.submit", values.as, (as) => cp.registration.submitDraft(need(values.id, "id"), as, { requestId: operator() }), (r) => `${r.agent.id} ${r.agent.lifecycleState}`, true);
+      case "agent transition": {
+        const to = need(values.to, "to") as LifecycleState;
+        if (!["draft", "pending_approval", "active", "suspended", "rejected", "retired"].includes(to)) throw new UsageError("--to must be a lifecycle state");
+        return result(cp, "cli.agent.transition", values.as, (as) => cp.registration.transition(need(values.id, "id"), to, as, values.reason, { requestId: operator() }), (r) => `${r.agent.id} ${r.agent.lifecycleState}`, true);
+      }
+      case "agent retire": return result(cp, "cli.agent.retire", values.as, (as) => cp.registration.retire(need(values.id, "id"), as, values.reason ?? "retired via CLI", { requestId: operator() }), (r) => `${r.agent.id} ${r.agent.lifecycleState}`);
+      case "agent risk-tier": {
+        const tier = need(values.tier, "tier") as RiskTier;
+        return result(cp, "cli.agent.risk_tier", values.as, (as) => cp.registration.setRiskTier(need(values.id, "id"), tier, as, values.reason, { requestId: operator() }), (r) => `${r.agent.id} tier=${r.agent.riskTier} computed=${r.agent.computedRiskTier} state=${r.agent.lifecycleState}`);
+      }
+      case "agent recertify": return result(cp, "cli.agent.recertify", values.as, (as) => cp.registration.recertify(need(values.id, "id"), as, { requestId: operator() }), (r) => `${r.agent.id} ${r.agent.lifecycleState} expires=${r.agent.expiresAt}`, true);
+      case "discovery list": {
+        const status = values.status as DiscoveryStatus | undefined;
+        if (status && !DISCOVERY_STATUSES.includes(status)) throw new UsageError(`--status must be one of ${DISCOVERY_STATUSES.join(", ")}`);
+        for (const d of cp.discovery.list({ status, source: values.source, queue: values.triage ? "triage" : undefined })) {
+          process.stdout.write(`${d.id}  ${d.status.padEnd(10)} ${d.source.padEnd(17)} x${d.count}  last=${d.lastSeen}  ${d.displayName}${d.ownerEmail ? `  owner=${d.ownerEmail}` : ""}${d.agentId ? `  agent=${d.agentId}` : ""}\n`);
+        }
+        return 0;
+      }
+      case "discovery claim": return result(cp, "cli.discovery.claim", values.as, (as) => cp.discovery.claim(need(values.id, "id"), as, { requestId: operator() }), (r) => `${r.item.id} claimed -> draft ${r.agent.id} owner=${r.agent.ownerEmail}`);
+      case "discovery assign-owner": return result(cp, "cli.discovery.assign_owner", values.as, (as) => cp.discovery.assignOwner(need(values.id, "id"), need(values.owner, "owner"), as, { requestId: operator() }), (r) => `${r.item.id} claimed -> draft ${r.agent.id} owner=${r.agent.ownerEmail}`);
+      case "discovery ignore": return result(cp, "cli.discovery.ignore", values.as, (as) => cp.discovery.ignore(need(values.id, "id"), as, values.reason, { requestId: operator() }), (r) => `${r.item.id} ignored`);
+      case "discovery disable": return result(cp, "cli.discovery.disable", values.as, (as) => cp.discovery.disable(need(values.id, "id"), as, values.reason, { requestId: operator() }), (r) => `${r.item.id} disabled${r.agent ? ` agent ${r.agent.id} ${r.agent.lifecycleState}` : ""}${r.manualActionRequired ? `\nmanual action: ${r.manualActionRequired}` : ""}`);
+      case "discovery import-egress": {
+        const file = need(values.file, "file");
+        let csv: string;
+        try { csv = readFileSync(file, "utf8"); } catch { throw new CliError(`cannot read ${file}`); }
+        return result(cp, "cli.discovery.import_egress", values.as, (as) => cp.discovery.importEgressCsv(csv, as, { requestId: operator() }), (r) => `rows=${r.rows} matched=${r.matched} skipped=${r.skipped} new=${r.created}${r.errors.length ? `\n${r.errors.join("\n")}` : ""}`);
+      }
+      case "discovery run": {
+        for (const c of connectorsFromEnv()) cp.scheduler.addConnector(c, cp.discovery);
+        const ids = cp.scheduler.jobIds().filter((j) => j.startsWith("connector:") && (!values.connector || j === `connector:${values.connector}`));
+        if (!ids.length) throw new CliError("no connectors configured (set ZENAI4_DISCOVERY_CONNECTORS)");
+        log(cp, "cli.discovery.run", "success", { jobs: ids });
+        let failed = false;
+        for (const id of ids) {
+          const r = await cp.scheduler.runOnce(id);
+          failed ||= r.status === "error";
+          process.stdout.write(`${id}  ${r.status}  items=${r.items} new=${r.created}${r.error ? `  error=${r.error}` : ""}\n`);
+        }
+        return failed ? 1 : 0;
+      }
+      case "discovery status": {
+        for (const j of cp.scheduler.status()) process.stdout.write(`${j.jobId}  every=${j.intervalMs / 3_600_000}h  last=${j.lastRun ? `${j.lastRun.status} ${j.lastRun.finishedAt ?? ""} items=${j.lastRun.items}${j.lastRun.error ? ` error=${j.lastRun.error}` : ""}` : "never"}\n`);
+        return 0;
+      }
+      case "sweep": {
+        const r = await cp.scheduler.runOnce("expiry-sweep");
+        log(cp, "cli.sweep", r.status === "ok" ? "success" : "failure", { suspended: r.items });
+        process.stdout.write(`expired agents suspended: ${r.items}\n`);
+        return r.status === "ok" ? 0 : 1;
+      }
       default:
         throw new UsageError(`unknown command: ${group} ${sub ?? ""}`.trim());
     }
   } finally {
     cp.close();
   }
+}
+
+/** The person a CLI action is performed as: must be an active directory user. */
+function actingAs(cp: ControlPlane, as: string | undefined): string {
+  const email = need(as, "as").toLowerCase();
+  const u = cp.directory.lookup(email);
+  if (!u?.active) throw new CliError(`--as ${email} is not an active user in the directory`);
+  return email;
+}
+
+function fail(violations: string[]): number {
+  process.stderr.write(`refused:\n${violations.map((v) => `  - ${v}`).join("\n")}\n`);
+  return 1;
+}
+
+/** Runs a service call as --as, logs the CLI action, prints the outcome. */
+function result<T extends { ok: boolean }>(
+  cp: ControlPlane, action: string, asFlag: string | undefined, fn: (as: string) => T,
+  render: (r: Extract<T, { ok: true }>) => string, maybeCredential = false,
+): number {
+  const as = actingAs(cp, asFlag);
+  const r = fn(as) as any;
+  log(cp, action, r.ok ? "success" : "denied", { as, violations: r.ok ? undefined : r.violations }, r.agent?.id ?? r.item?.id);
+  if (!r.ok) return fail(r.violations);
+  process.stderr.write(render(r) + "\n");
+  if (maybeCredential && r.credential) { process.stderr.write(`Agent credential (shown once, expires ${r.credential.expiresAt}):\n`); process.stdout.write(r.credential.token + "\n"); }
+  return 0;
+}
+
+const list = (s: string | undefined) => (s ?? "").split(",").map((x) => x.trim()).filter(Boolean);
+
+/** --tools issue_refund:irreversible:financial+customer_pii,read_invoice:reversible
+ * Tools without their own data classes get --data-classes. */
+export function parseTools(spec: string | undefined, defaultClasses: string[]): Omit<ToolGrant, "agentId">[] {
+  return list(spec).map((t) => {
+    const [toolName, rev = "reversible", dcs] = t.split(":");
+    if (!toolName || !["reversible", "irreversible"].includes(rev)) throw new UsageError(`bad --tools entry "${t}": use name:reversible|irreversible[:dc1+dc2]`);
+    return { toolName, reversible: rev === "reversible", dataClasses: dcs ? dcs.split("+").filter(Boolean) : defaultClasses };
+  });
+}
+
+function registrationFromFlags(v: Record<string, any>): Partial<RegistrationRequest> {
+  const micro = (s: string | undefined, flag: string) => {
+    if (s === undefined) return undefined;
+    const n = Number(s);
+    if (!Number.isInteger(n) || n < 0) throw new UsageError(`--${flag} must be a non-negative integer (micro-USD)`);
+    return n;
+  };
+  if (v.autonomy && !AUTONOMY.includes(v.autonomy)) throw new UsageError("--autonomy must be A0-A4");
+  if (v.mode && !["enforcement", "posture"].includes(v.mode)) throw new UsageError("--mode must be enforcement or posture");
+  const models = list(v.models);
+  return {
+    name: v.name, purpose: v.purpose, ownerEmail: v.owner?.toLowerCase(), subOwnerEmail: v["sub-owner"]?.toLowerCase(),
+    accessProfileId: v.profile, businessUnit: v["business-unit"], platform: v.platform,
+    modelProvider: v["model-provider"], modelVersion: v["model-version"], permittedModels: models.length ? models : undefined,
+    autonomyDefault: v.autonomy, mode: v.mode ?? "enforcement",
+    tools: parseTools(v.tools, list(v["data-classes"])),
+    budgetPolicy: { agentLimitMicro: micro(v["agent-limit-micro"], "agent-limit-micro"), defaultTaskLimitMicro: micro(v["task-limit-micro"], "task-limit-micro") },
+    expiresAt: v["expires-at"],
+  };
+}
+
+/** CI mode: POST the manifest to the gateway. The token is read from the
+ * environment, sent only in the Authorization header, and never printed. */
+async function applyRemote(file: string): Promise<number> {
+  const base = process.env.ZENAI4_URL!.replace(/\/+$/, "");
+  const token = process.env.ZENAI4_TOKEN;
+  if (!token) throw new CliError("ZENAI4_URL is set but ZENAI4_TOKEN is not");
+  if (!/^https:\/\//.test(base) && !/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(base)) throw new CliError("ZENAI4_URL must be https:// (http only for localhost)");
+  let text: string;
+  try { text = readFileSync(file, "utf8"); } catch { throw new CliError(`cannot read ${file}`); }
+  const res = await fetch(`${base}/v1/agents/apply`, { method: "POST", headers: { "content-type": "application/yaml", authorization: `Bearer ${token}` }, body: text });
+  let body: any;
+  try { body = await res.json(); } catch { body = {}; }
+  if (!res.ok) {
+    process.stderr.write(`apply refused (HTTP ${res.status}):\n${(body.violations ?? [body.error ?? "unknown error"]).map((v: string) => `  - ${v}`).join("\n")}\n`);
+    return 1;
+  }
+  process.stdout.write(`${body.action} ${body.agentId} state=${body.lifecycleState} tier=${body.riskTier}${body.reReview ? " (re-review required)" : ""}${body.missing?.length ? ` missing=${body.missing.join(",")}` : ""}\n`);
+  return 0;
 }
 
 function ttlMinutes(h: string | undefined): number {
