@@ -209,3 +209,57 @@ spec:
   for (const a of ["cli.agent.register", "cli.apply", "agent.apply", "cli.discovery.import_egress", "cli.discovery.claim", "discovery.claim", "cli.sweep"]) assert.ok(acts.has(a), a);
   cp.close();
 });
+
+test("phase 1.1: source add prints a working token once, revoke stops it; telemetry commands work", async () => {
+  process.env.ZENAI4_GAP_GRACE_MINUTES = "0"; // report sequence gaps at once (child processes inherit this)
+  const { db, cli } = setup();
+  assert.equal(cli("init", "--admin-email", "ops@acme.test", "--admin-name", "Ops").code, 0);
+  assert.equal(cli("user", "add", "--email", "sec@acme.test", "--name", "Sec", "--roles", "security_reviewer").code, 0);
+  assert.equal(cli("user", "add", "--email", "own@acme.test", "--name", "Own", "--roles", "agent_owner").code, 0);
+
+  const denied = cli("source", "add", "--name", "vm1", "--as", "own@acme.test");
+  assert.equal(denied.code, 1);
+  assert.match(denied.err, /only a security reviewer or admin/);
+  assert.equal(cli("source", "add", "--name", "vm1", "--capture", "everything", "--as", "sec@acme.test").code, 2);
+
+  const add = cli("source", "add", "--name", "vm1", "--kind", "steps", "--capture", "redacted", "--as", "sec@acme.test");
+  assert.equal(add.code, 0, add.err);
+  assert.match(add.out, /^zsrc\.[A-Za-z0-9]+\.[A-Za-z0-9_-]{40,}$/, "stdout is exactly the token");
+  const id = add.out.split(".")[1];
+  assert.match(cli("source", "list").out, new RegExp(`${id}\\s+enabled\\s+steps\\s+capture=redacted`));
+
+  const post = async () => {
+    const cp = buildControlPlane({ dbPath: db });
+    const server = createSecureGateway(cp).listen(0, "127.0.0.1");
+    await new Promise((r) => server.once("listening", r));
+    try {
+      const r = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/v1/intake/steps`, {
+        method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${add.out}` },
+        body: JSON.stringify({ steps: [{ session_id: "s", seq: 0, ts: new Date().toISOString(), agent_key: "unknown-bot" }, { session_id: "s", seq: 3, ts: new Date().toISOString(), agent_key: "unknown-bot" }] }),
+      });
+      return r.status;
+    } finally { server.closeAllConnections?.(); await new Promise((r) => server.close(r)); cp.close(); }
+  };
+  assert.equal(await post(), 200);
+
+  const rec = cli("telemetry", "reconcile");
+  assert.equal(rec.code, 0, rec.err);
+  assert.match(rec.out, /reconcile ok steps=2/);
+  const alerts = cli("telemetry", "alerts", "--status", "open");
+  assert.match(alerts.out, /telemetry_gap/);
+  const alertId = alerts.out.split(/\s+/)[0];
+  assert.equal(cli("telemetry", "ack", "--id", alertId, "--as", "sec@acme.test").code, 2, "reason is required");
+  assert.equal(cli("telemetry", "ack", "--id", alertId, "--reason", "test sender", "--as", "own@acme.test").code, 1);
+  assert.equal(cli("telemetry", "ack", "--id", alertId, "--reason", "test sender", "--as", "sec@acme.test").code, 0);
+  assert.match(cli("telemetry", "alerts", "--status", "acknowledged").out, new RegExp(alertId));
+  assert.match(cli("discovery", "list", "--source", "telemetry").out, /unknown-bot/);
+  assert.equal(cli("telemetry", "verify").out, "intact");
+
+  assert.equal(cli("source", "revoke", "--id", id, "--reason", "rotate", "--as", "sec@acme.test").code, 0);
+  assert.equal(await post(), 401);
+
+  const raw = new Database(db, { readonly: true });
+  const all = ["intake_sources", "audit_events"].map((t) => JSON.stringify(raw.prepare(`SELECT * FROM ${t}`).all())).join("");
+  raw.close();
+  assert.ok(!all.includes(add.out.split(".")[2]), "source secret never stored or logged");
+});

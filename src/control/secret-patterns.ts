@@ -36,6 +36,8 @@ export const LLM_KEY_PATTERNS: KeyPattern[] = [
 
 /** ZenAi4's own credential format (gai.<a|u>.<keyId>.<secret>). */
 const ZENAI4_TOKEN = /gai\.[au]\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{16,}/g;
+/** ZenAi4 intake-source token (zsrc.<sourceId>.<secret>), phase 1.1. */
+const ZENAI4_SOURCE_TOKEN = /zsrc\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{16,}/g;
 /** Generic bearer / basic auth values. */
 const AUTH_HEADER = /\b(Bearer|Basic|SSWS)\s+[A-Za-z0-9._~+/=-]{16,}/g;
 
@@ -75,7 +77,7 @@ export function findKeys(text: string): KeyHit[] {
 export function scrubSecrets(s: string): string {
   let out = s;
   for (const p of LLM_KEY_PATTERNS) out = out.replace(new RegExp(p.re.source, "g"), "[redacted]");
-  return out.replace(ZENAI4_TOKEN, "[redacted]").replace(AUTH_HEADER, "$1 [redacted]");
+  return out.replace(ZENAI4_TOKEN, "[redacted]").replace(ZENAI4_SOURCE_TOKEN, "[redacted]").replace(AUTH_HEADER, "$1 [redacted]");
 }
 
 /** Deep-scrubs any JSON-like value. */

@@ -32,6 +32,13 @@
 //   zenai4-admin discovery import-egress --file egress.csv --as | run [--connector id] | status
 //   zenai4-admin sweep                                    run the expiry sweep now
 //
+// Phase 1.1 (telemetry and reconciliation):
+//   zenai4-admin source add --name otel-vm1 [--kind otlp|steps] [--capture none|metadata|redacted] --as <e>
+//   zenai4-admin source revoke --id <id> --reason <r> --as <e> | source list
+//   zenai4-admin telemetry alerts [--status open] [--kind drift] | ack --id <id> --reason <r> --as <e>
+//   zenai4-admin telemetry reconcile | retention | dormant | violations [--agent id] | verify
+//   zenai4-admin agent activity --id <id> [--days 90]
+//
 // Reads ZENAI4_DB_PATH (default ./zenai4.db). Exit codes: 0 ok, 1 failure, 2 usage.
 
 import "../config/env-compat.js";
@@ -48,6 +55,9 @@ import type { RegistrationRequest } from "./registration.js";
 import { connectorsFromEnv } from "../discovery/connectors.js";
 import { DISCOVERY_STATUSES, type DiscoveryStatus } from "../discovery/discovery.js";
 import type { LifecycleState, RiskTier, ToolGrant } from "../types.js";
+import { hasRole } from "./identity.js";
+import { CAPTURE_MODES, type CaptureMode } from "../telemetry/config.js";
+import type { AlertKind } from "../telemetry/store.js";
 
 const ROLES: Role[] = ["admin", "security_reviewer", "budget_admin", "auditor", "agent_owner", "ci_registrar"];
 const AUTONOMY = ["A0", "A1", "A2", "A3", "A4"];
@@ -89,6 +99,19 @@ Registration and discovery (--as <email> = the person acting; their roles apply)
   discovery run [--connector <id>]                           runs connectors from ZENAI4_DISCOVERY_CONNECTORS now
   discovery status
   sweep                                                      expiry sweep now
+
+Telemetry intake and reconciliation (phase 1.1):
+  source add --name <n> [--kind otlp|steps] [--capture none|metadata|redacted] --as <e>
+                                                             security/admin; prints the source token once
+  source revoke --id <id> --reason <r> --as <e>              the token stops working at once
+  source list
+  telemetry alerts [--status open|acknowledged] [--kind <k>] [--agent <id>]
+  telemetry ack --id <alert> --reason <r> --as <e>           security/admin; reason required
+  telemetry reconcile                                        run reconciliation now
+  telemetry retention                                        null payloads past retention now
+  telemetry dormant                                          active agents with no recent activity
+  telemetry violations [--agent <id>] | telemetry verify     violation log; verify its hash chain
+  agent activity --id <id> [--days 90]                       what the agent actually did
 
 Exit codes: 0 ok, 1 failure, 2 usage error.
 `;
@@ -154,6 +177,7 @@ async function run(argv: string[]): Promise<number> {
       mode: { type: "string" }, draft: { type: "boolean" }, tier: { type: "string" }, reason: { type: "string" }, days: { type: "string" },
       status: { type: "string" }, triage: { type: "boolean" }, source: { type: "string" }, connector: { type: "string" },
       "agent-limit-micro": { type: "string" }, "task-limit-micro": { type: "string" },
+      kind: { type: "string" }, capture: { type: "string" }, agent: { type: "string" },
     },
     strict: true,
   });
@@ -357,6 +381,101 @@ async function run(argv: string[]): Promise<number> {
         log(cp, "cli.sweep", r.status === "ok" ? "success" : "failure", { suspended: r.items });
         process.stdout.write(`expired agents suspended: ${r.items}\n`);
         return r.status === "ok" ? 0 : 1;
+      }
+      case "source add": {
+        const as = actingAs(cp, values.as);
+        const name = need(values.name, "name");
+        const kind = values.kind ?? "otlp";
+        if (!["otlp", "steps", "litellm", "file", "syslog"].includes(kind)) throw new UsageError("--kind must be otlp, steps, litellm, file or syslog");
+        const capture = (values.capture ?? "metadata") as CaptureMode;
+        if (!CAPTURE_MODES.includes(capture)) throw new UsageError(`--capture must be one of ${CAPTURE_MODES.join(", ")}`);
+        if (!hasRole(cp.directory.lookup(as), "security_reviewer", "admin")) {
+          log(cp, "cli.source.add", "denied", { as, name, violations: ["only a security reviewer or admin may create an intake source"] });
+          return fail(["only a security reviewer or admin may create an intake source"]);
+        }
+        const { source, token } = cp.telemetry.createSource(name, kind, capture, as);
+        cp.audit.append({ stream: "user", actorType: "user", actorId: as, action: "intake.source.create", targetType: "intake_source", targetId: source.id, outcome: "success", requestId: operator(), details: { name, kind, captureMode: capture } });
+        log(cp, "cli.source.add", "success", { as, sourceId: source.id, name, kind, captureMode: capture }, source.id);
+        process.stderr.write(`Intake source ${source.id} (${name}, ${kind}, capture=${capture}). Token (shown once):\n`);
+        process.stdout.write(token + "\n");
+        return 0;
+      }
+      case "source revoke": {
+        const as = actingAs(cp, values.as);
+        const id = need(values.id, "id");
+        const reason = need(values.reason, "reason");
+        const v: string[] = [];
+        const src = cp.telemetry.getSource(id);
+        if (!hasRole(cp.directory.lookup(as), "security_reviewer", "admin")) v.push("only a security reviewer or admin may revoke an intake source");
+        if (!src) v.push(`unknown source ${id}`);
+        else if (src.revokedAt) v.push("source is already revoked");
+        if (v.length) { log(cp, "cli.source.revoke", "denied", { as, violations: v }, id); return fail(v); }
+        cp.telemetry.revokeSource(id, as, reason);
+        cp.audit.append({ stream: "user", actorType: "user", actorId: as, action: "intake.source.revoke", targetType: "intake_source", targetId: id, outcome: "success", requestId: operator(), details: { reason } });
+        log(cp, "cli.source.revoke", "success", { as, reason }, id);
+        process.stderr.write(`Intake source ${id} revoked.\n`);
+        return 0;
+      }
+      case "source list": {
+        for (const x of cp.telemetry.listSources()) process.stdout.write(`${x.id}  ${x.enabled ? "enabled " : "revoked "} ${x.kind.padEnd(7)} capture=${x.captureMode.padEnd(8)} last=${x.lastSeenAt ?? "never"}  ${x.name}\n`);
+        return 0;
+      }
+      case "telemetry alerts": {
+        const status = values.status === "open" || values.status === "acknowledged" ? values.status : values.status ? (() => { throw new UsageError("--status must be open or acknowledged"); })() : undefined;
+        for (const a of cp.telemetry.listAlerts({ status, kind: values.kind as AlertKind | undefined, agentId: values.agent })) {
+          process.stdout.write(`${a.id}  ${a.status.padEnd(12)} ${a.severity.padEnd(6)} ${a.kind.padEnd(19)} x${a.count}  last=${a.lastSeen}${a.agentId ? `  agent=${a.agentId}` : ""}  ${JSON.stringify(a.details).slice(0, 160)}\n`);
+        }
+        return 0;
+      }
+      case "telemetry ack": {
+        const as = actingAs(cp, values.as);
+        const id = need(values.id, "id");
+        const reason = need(values.reason, "reason");
+        const a = cp.telemetry.getAlert(id);
+        const v: string[] = [];
+        if (!hasRole(cp.directory.lookup(as), "security_reviewer", "admin")) v.push("only a security reviewer or admin may acknowledge an alert");
+        if (!a) v.push(`unknown alert ${id}`);
+        else if (a.status !== "open") v.push(`alert is already ${a.status}`);
+        if (v.length) { cp.audit.append({ stream: "user", actorType: "user", actorId: as, action: "telemetry.alert.ack", targetType: "telemetry_alert", targetId: id, outcome: "denied", requestId: operator(), details: { violations: v } }); return fail(v); }
+        cp.telemetry.ackAlert(id, as, reason);
+        cp.audit.append({ stream: "user", actorType: "user", actorId: as, action: "telemetry.alert.ack", targetType: "telemetry_alert", targetId: id, outcome: "success", requestId: operator(), details: { kind: a!.kind, agentId: a!.agentId, reason } });
+        log(cp, "cli.telemetry.ack", "success", { as, reason }, id);
+        process.stderr.write(`Alert ${id} acknowledged.\n`);
+        return 0;
+      }
+      case "telemetry reconcile": {
+        const r = await cp.scheduler.runOnce("telemetry-reconcile");
+        log(cp, "cli.telemetry.reconcile", r.status === "ok" ? "success" : "failure", { runId: r.id, items: r.items });
+        process.stdout.write(`reconcile ${r.status} steps=${r.items} new=${r.created}${r.error ? ` error=${r.error}` : ""}\n`);
+        return r.status === "ok" ? 0 : 1;
+      }
+      case "telemetry retention": {
+        const r = await cp.scheduler.runOnce("telemetry-retention");
+        log(cp, "cli.telemetry.retention", r.status === "ok" ? "success" : "failure", { purged: r.items });
+        process.stdout.write(`payloads purged: ${r.items}\n`);
+        return r.status === "ok" ? 0 : 1;
+      }
+      case "telemetry dormant": {
+        for (const d of cp.reconcile.dormantAgents()) process.stdout.write(`${d.agent.id}  idle=${d.idleDays}d  last=${d.lastSeen ?? "never"}  ${d.agent.name}  owner=${d.agent.ownerEmail}\n`);
+        return 0;
+      }
+      case "telemetry violations": {
+        for (const x of cp.telemetry.listViolations({ agentId: values.agent })) process.stdout.write(`#${x.seq}  ${x.ts}  ${x.decision.padEnd(17)} ${x.policyId}${x.policyVersion !== undefined ? ` v${x.policyVersion}` : ""}${x.rule ? ` rule=${x.rule}` : ""}  agent=${x.agentId ?? x.observedAgentKey ?? "?"}  ${x.blockedAction ?? ""}\n`);
+        return 0;
+      }
+      case "telemetry verify": {
+        const broken = cp.telemetry.verifyViolationChain();
+        log(cp, "cli.telemetry.verify", broken === -1 ? "success" : "failure", { firstBroken: broken });
+        process.stdout.write(broken === -1 ? "intact\n" : `BROKEN at violation seq ${broken}\n`);
+        return broken === -1 ? 0 : 1;
+      }
+      case "agent activity": {
+        const days = values.days ? Number(values.days) : 90;
+        if (!Number.isFinite(days) || days <= 0) throw new UsageError("--days must be a positive number");
+        const s = cp.reconcile.activitySummary(need(values.id, "id"), days);
+        if (!s) throw new CliError("no such agent");
+        process.stdout.write(JSON.stringify(s, null, 2) + "\n");
+        return 0;
       }
       default:
         throw new UsageError(`unknown command: ${group} ${sub ?? ""}`.trim());

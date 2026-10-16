@@ -1,0 +1,27 @@
+# TLS front for ZenAi4 on a single VM. Pick ONE tls line:
+#   tls internal                         Caddy's own CA - fine for a pilot; clients must trust it
+#   tls /certs/cert.pem /certs/key.pem   your company certificate (put files in ./certs)
+#
+# Only the gateway is proxied. Postgres and Studio are never exposed here.
+{$ZENAI4_HOSTNAME} {
+	tls internal
+
+	# Telemetry batches are larger than API calls; the gateway enforces its own
+	# limit (ZENAI4_INTAKE_MAX_BYTES, default 1 MiB) after authentication.
+	@intake path /v1/intake/*
+	request_body @intake {
+		max_size 8MB
+	}
+	@api not path /v1/intake/*
+	request_body @api {
+		max_size 1MB
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+	}
+
+	reverse_proxy gateway:8787
+}

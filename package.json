@@ -14,7 +14,7 @@
     "mcp:approve": "npm run build && node dist/mcp/approve.js",
     "agent:claude": "npm run build && node dist/demo/claude-agent-demo.js",
     "context:demo": "npm run build && node dist/orchestration/demo.js",
-    "test": "npm run build && node --test --test-force-exit dist/budget/budget.test.js dist/control/control.test.js dist/control/admin-mcp.test.js dist/control/admin-cli.test.js dist/control/phase1.test.js dist/discovery/connectors.test.js",
+    "test": "npm run build && node --test --test-force-exit dist/budget/budget.test.js dist/control/control.test.js dist/control/admin-mcp.test.js dist/control/admin-cli.test.js dist/control/phase1.test.js dist/discovery/connectors.test.js dist/telemetry/telemetry.test.js",
     "budget:demo": "npm run build && node dist/budget/demo.js",
     "server:dev": "npm run build && node dist/gateway/server.js",
     "admin": "node dist/control/admin-cli.js"

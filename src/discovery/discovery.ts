@@ -8,7 +8,8 @@
 //     provider domains ("something is calling a provider directly");
 //   - read-only discovery connectors (Entra ID, Okta, Copilot Studio,
 //     Gemini Enterprise, GitHub) run by the scheduler;
-//   - (later) observed agents from log intake.
+//   - telemetry intake (phase 1.1): agent keys reported by an intake source
+//     that match no registered agent (src/telemetry/reconcile.ts).
 //
 // Secrets: a fingerprint is built ONLY from non-secret attributes (source
 // address, user agent, the public credential key-id prefix, a connector's
@@ -47,7 +48,7 @@ export type DiscoveryStatus = "new" | "claimed" | "registered" | "ignored" | "di
 export const DISCOVERY_STATUSES: DiscoveryStatus[] = ["new", "claimed", "registered", "ignored", "disabled"];
 
 export type DiscoverySource =
-  | "gateway" | "egress_import" | "entra_id" | "okta" | "copilot_studio" | "gemini_enterprise" | "github";
+  | "gateway" | "egress_import" | "entra_id" | "okta" | "copilot_studio" | "gemini_enterprise" | "github" | "telemetry";
 
 export interface DiscoveredAgent {
   id: string;
@@ -117,7 +118,7 @@ export function providerForDomain(domain: string): string | undefined {
 
 const PLATFORM_FOR_SOURCE: Record<DiscoverySource, string> = {
   gateway: "custom", egress_import: "custom", entra_id: "entra-id", okta: "okta",
-  copilot_studio: "copilot-studio", gemini_enterprise: "gemini-enterprise", github: "custom",
+  copilot_studio: "copilot-studio", gemini_enterprise: "gemini-enterprise", github: "custom", telemetry: "custom",
 };
 
 export const fingerprintOf = (source: string, identity: string[]) =>
@@ -243,6 +244,12 @@ export class DiscoveryService {
   }
 
   // ------------------------------------------------------------------ read path
+
+  /** The row a sighting with this source + identity would update, if any. */
+  findByIdentity(source: DiscoverySource, identity: string[]): DiscoveredAgent | undefined {
+    const r = this.db.prepare(`SELECT * FROM discovered_agents WHERE fingerprint = ?`).get(fingerprintOf(source, identity)) as any;
+    return r ? rowTo(r) : undefined;
+  }
 
   get(id: string): DiscoveredAgent | undefined {
     const r = this.db.prepare(`SELECT * FROM discovered_agents WHERE id = ?`).get(id) as any;

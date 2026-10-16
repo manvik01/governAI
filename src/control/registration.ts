@@ -432,10 +432,7 @@ export class RegistrationService {
     const reviewTier = tierRank(updated.riskTier) >= tierRank("high") || profile?.requiresSecurityReview === true;
     let reReview = false;
     if (widened.length && reviewTier && (updated.lifecycleState === "active" || updated.lifecycleState === "suspended")) {
-      updated = this.registry.transition(agentId, "pending_approval", "system:registration-service", "access widened; security re-review required", {
-        securityReview: { status: "pending", notes: `widened: ${widened.join("; ")}` },
-      });
-      this.revokeCredentials(agentId, "access_widened_pending_review", ctx);
+      updated = this.sendToReReview(agentId, "system:registration-service", "access widened; security re-review required", widened, "access_widened_pending_review", ctx) ?? updated;
       reReview = true;
     } else if (widened.length && updated.lifecycleState === "pending_approval") {
       // Anything a reviewer may already have looked at is stale now.
@@ -447,6 +444,37 @@ export class RegistrationService {
       details: { widened, reReview, riskTier: updated.riskTier, lifecycleState: updated.lifecycleState, via: opts.manifestId ? "manifest" : "api" },
     });
     return { ok: true, agent: updated, widened, reReview };
+  }
+
+  /** Sends an active (or suspended) agent back to security review with the
+   * reasons recorded on the pending review, and revokes its credentials until
+   * it is re-approved. Shared by widening updates and by telemetry
+   * reconciliation (observed drift in enforce_review mode). Returns undefined
+   * when the agent is in a state that cannot go to review. */
+  sendToReReview(agentId: string, actor: string, reason: string, widened: string[], revokeReason: string, ctx: Ctx = {}): Agent | undefined {
+    const agent = this.registry.get(agentId);
+    if (!agent || !(agent.lifecycleState === "active" || agent.lifecycleState === "suspended")) return undefined;
+    const updated = this.registry.transition(agentId, "pending_approval", actor, reason, {
+      securityReview: { status: "pending", notes: `widened: ${widened.join("; ")}` },
+    });
+    this.revokeCredentials(agentId, revokeReason, ctx);
+    return updated;
+  }
+
+  /** Records a risk-tier raise decided by the system (telemetry: repeated
+   * policy violations). Stored as a "raise" override by "system:<name>", so
+   * owners cannot lower it (only a security reviewer can, under the Phase 1
+   * rules in setRiskTier) and the audit shows who raised it and why. */
+  systemRaiseRiskTier(agentId: string, tier: RiskTier, actor: string, reason: string, ctx: Ctx = {}): Agent | undefined {
+    const agent = this.registry.get(agentId);
+    if (!agent || agent.lifecycleState === "retired" || tierRank(tier) <= tierRank(agent.riskTier)) return undefined;
+    const updated = this.registry.setRiskOverride(agentId, { tier, direction: "raise", by: actor, reason, at: this.now().toISOString() }, actor);
+    this.audit.append({
+      stream: "audit", actorType: "system", actorId: actor, action: "agent.risk_tier.set", targetType: "agent", targetId: agentId,
+      outcome: "success", sourceIp: ctx.sourceIp, requestId: ctx.requestId,
+      details: { from: agent.riskTier, to: updated.riskTier, computed: updated.computedRiskTier, direction: "raise", reason },
+    });
+    return updated;
   }
 
   /** Owners raise; security lowers (never their own agent); lowering below the
