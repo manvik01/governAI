@@ -629,3 +629,18 @@ test("restart keeps discovery rows, overrides and expiry (state is in the databa
   raw.close();
   cp2.close();
 });
+
+test("the shipped examples/agent.yaml is a valid manifest and registers a high-risk agent for review", async () => {
+  const { readFileSync } = await import("node:fs");
+  const text = readFileSync(new URL("../../examples/agent.yaml", import.meta.url), "utf8");
+  const parsed = parseManifest(text);
+  assert.ok(parsed.ok, JSON.stringify(!parsed.ok && parsed.errors));
+  const env = await mkEnv();
+  env.cp.directory.upsert({ email: "alice@acme.com", displayName: "a", active: true, roles: ["agent_owner"] });
+  env.cp.directory.upsert({ email: "bob@acme.com", displayName: "b", active: true, roles: ["agent_owner"] });
+  const out = env.cp.manifests.applyText(text, "ci@example.com");
+  assert.ok(out.ok, JSON.stringify(!out.ok && out.violations));
+  assert.equal(out.ok && out.agent.lifecycleState, "pending_approval");
+  assert.equal(out.ok && out.agent.riskTier, "high");
+  await env.close();
+});
