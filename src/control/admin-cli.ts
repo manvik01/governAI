@@ -29,7 +29,7 @@ import { buildControlPlane, DEFAULT_PROFILES, type ControlPlane } from "./contro
 import type { Role } from "./identity.js";
 import type { AccessProfile } from "./access-profiles.js";
 
-const ROLES: Role[] = ["admin", "security_reviewer", "budget_admin", "auditor", "agent_owner"];
+const ROLES: Role[] = ["admin", "security_reviewer", "budget_admin", "auditor", "agent_owner", "ci_registrar"];
 const AUTONOMY = ["A0", "A1", "A2", "A3", "A4"];
 const MAGIC = Buffer.from("GAIBAK1\n");
 
