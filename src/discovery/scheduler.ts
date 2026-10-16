@@ -113,6 +113,10 @@ export class Scheduler {
       rec.finishedAt = rec.startedAt;
       rec.error = "previous run still in progress";
       this.save(rec);
+      this.audit.append({
+        stream: "audit", actorType: "system", actorId: "scheduler", action: "discovery.run", targetType: "job", targetId: jobId,
+        outcome: "failure", details: { runId: rec.id, status: "skipped", reason: rec.error },
+      });
       return rec;
     }
     this.inFlight.add(jobId);

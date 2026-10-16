@@ -66,7 +66,8 @@ export const manifestSchema = z.strictObject({
       .optional(),
     accessProfile: z.string().min(1).optional(),
     autonomy: z.enum(["A0", "A1", "A2", "A3", "A4"]).optional(),
-    mode: z.enum(["enforcement", "posture"]).optional(),
+    /** Defaults to enforcement; posture = observe only. */
+    mode: z.enum(["enforcement", "posture"]).default("enforcement"),
     tools: z
       .array(
         z.strictObject({
@@ -189,6 +190,10 @@ export class ManifestService {
       return this.done(by, m, hash, { ok: true, action: "created", agent: s.agent }, ctx);
     }
 
+    // Even a no-op is only answered for someone allowed to manage this agent.
+    if (!this.registration.mayManage(existing, by, opts.delegateRoles)) {
+      return this.refuse(by, m.metadata.id, ["only the owner, the sub-owner, an admin or a ci_registrar may apply this manifest"], ctx);
+    }
     if (existing.manifestHash === hash) {
       return this.done(by, m, hash, { ok: true, action: "unchanged", agent: existing }, ctx);
     }

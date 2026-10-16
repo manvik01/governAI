@@ -212,6 +212,13 @@ export class RegistrationService {
     return count;
   }
 
+  /** May `by` change this agent's registration? Owner, sub-owner, admin, or a delegate role. */
+  mayManage(agent: Agent, by: string, delegateRoles: Array<"ci_registrar"> = []): boolean {
+    const user = this.directory.lookup(by);
+    return hasRole(user, "admin", ...delegateRoles) ||
+      (hasRole(user, "agent_owner") && (same(by, agent.ownerEmail) || same(by, agent.subOwnerEmail)));
+  }
+
   /** Revokes every credential of an agent (audited). Used by discovery's disable. */
   revokeAgentCredentials(agentId: string, reason: string, ctx: Ctx = {}) {
     return this.revokeCredentials(agentId, reason, ctx);
@@ -384,10 +391,7 @@ export class RegistrationService {
     const agent = this.registry.get(agentId);
     if (!agent) return this.deny(by, "agent.update", agentId, [`unknown agent ${agentId}`], ctx);
     if (agent.lifecycleState === "retired") return this.deny(by, "agent.update", agentId, ["agent is retired; retired agents cannot be changed"], ctx);
-    const user = this.directory.lookup(by);
-    const mayEdit = hasRole(user, "admin", ...(opts.delegateRoles ?? [])) ||
-      (hasRole(user, "agent_owner") && (same(by, agent.ownerEmail) || same(by, agent.subOwnerEmail)));
-    if (!mayEdit) return this.deny(by, "agent.update", agentId, ["only the owner, the sub-owner or an admin may change this agent"], ctx);
+    if (!this.mayManage(agent, by, opts.delegateRoles)) return this.deny(by, "agent.update", agentId, ["only the owner, the sub-owner or an admin may change this agent"], ctx);
 
     const beforeTools = this.registry.grantsFor(agentId).map(({ agentId: _a, ...t }) => t);
     const merged = { ...requestFromAgent(agent, beforeTools), ...stripUndefined(req) };
