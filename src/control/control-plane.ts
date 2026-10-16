@@ -1,6 +1,12 @@
 // Control plane composition: builds every control-plane service around one
 // shared database connection so registry, credentials, audit log, security
 // monitor and the governance ledger all live in the same durable store.
+//
+// Phase 1 adds: manifests (registration as code), discovery (gateway,
+// egress import, connectors, triage queue) and a scheduler that runs the
+// discovery connectors and the expiry sweep. The scheduler is built but not
+// started here; the gateway process starts it when ZENAI4_SCHEDULER=1, so
+// tests and the CLI never run background jobs by accident.
 
 import Database from "better-sqlite3";
 import { AgentRegistry } from "../registry/registry.js";
@@ -14,6 +20,10 @@ import { CredentialService } from "./credentials.js";
 import { AccessProfileStore, type AccessProfile } from "./access-profiles.js";
 import { RegistrationService } from "./registration.js";
 import { SecurityMonitor, type MonitorOptions } from "./security-monitor.js";
+import { ManifestService } from "./manifest.js";
+import { DiscoveryService } from "../discovery/discovery.js";
+import { Scheduler, intervalFromEnv } from "../discovery/scheduler.js";
+import type { DiscoveryConnector } from "../discovery/connectors.js";
 
 export interface ControlPlaneOptions {
   dbPath: string;
@@ -23,6 +33,12 @@ export interface ControlPlaneOptions {
   approvals?: ApprovalChannel;
   monitor?: Partial<MonitorOptions>;
   now?: () => Date;
+  /** Default certification period in days (90). */
+  certificationDays?: number;
+  /** Discovery connectors to schedule (see connectorsFromEnv). */
+  connectors?: DiscoveryConnector[];
+  /** Interval for connector runs; defaults to ZENAI4_DISCOVERY_INTERVAL_HOURS or 6h. */
+  discoveryIntervalMs?: number;
 }
 
 export function buildControlPlane(opts: ControlPlaneOptions) {
@@ -34,7 +50,7 @@ export function buildControlPlane(opts: ControlPlaneOptions) {
   if (opts.siemPath) sinks.push(new JsonLinesSink(opts.siemPath));
   const audit = new AuditLog(db, sinks, opts.now);
 
-  const registry = new AgentRegistry(db);
+  const registry = new AgentRegistry(db, opts.now);
   // Every registry state change - from any caller - becomes an audit/user log entry.
   registry.setChangeListener((c) => {
     const human = c.actor.includes("@");
@@ -53,7 +69,14 @@ export function buildControlPlane(opts: ControlPlaneOptions) {
   const directory = new SqliteDirectory(db);
   const profiles = new AccessProfileStore(db);
   const credentials = new CredentialService(db, opts.now);
-  const registration = new RegistrationService(registry, directory, profiles, credentials, audit);
+  const registration = new RegistrationService(registry, directory, profiles, credentials, audit, {
+    certificationDays: opts.certificationDays, now: opts.now,
+  });
+  const manifests = new ManifestService(registry, registration, audit);
+  const discovery = new DiscoveryService(db, audit, registry, registration, directory, opts.now);
+  const scheduler = new Scheduler(db, audit, { defaultIntervalMs: opts.discoveryIntervalMs ?? intervalFromEnv(), now: opts.now });
+  for (const c of opts.connectors ?? []) scheduler.addConnector(c, discovery);
+  scheduler.addExpirySweep(registration);
   const monitor = new SecurityMonitor(db, audit, opts.monitor);
 
   const ledger = new Ledger(opts.dbPath);
@@ -81,7 +104,9 @@ export function buildControlPlane(opts: ControlPlaneOptions) {
 
   return {
     db, audit, registry, directory, profiles, credentials, registration, monitor, ledger, policyEngine, gateway, savePolicy,
+    manifests, discovery, scheduler,
     close() {
+      scheduler.stop();
       ledger.close();
       db.close();
     },

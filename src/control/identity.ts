@@ -9,7 +9,9 @@
 
 import Database from "better-sqlite3";
 
-export type Role = "admin" | "security_reviewer" | "budget_admin" | "auditor" | "agent_owner";
+/** ci_registrar: a pipeline identity that may apply agent.yaml manifests on
+ * behalf of the owners named in them. It cannot review, own or claim. */
+export type Role = "admin" | "security_reviewer" | "budget_admin" | "auditor" | "agent_owner" | "ci_registrar";
 
 export interface DirectoryUser {
   email: string;

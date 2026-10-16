@@ -11,7 +11,9 @@
 // attacker's probing is evidence too.
 //
 // Secrets never enter the log: detail keys that look sensitive are redacted
-// at write time, so even a careless caller cannot persist a token.
+// at write time, and string values are scrubbed of anything shaped like a
+// provider API key or ZenAi4 credential (secret-patterns.ts), so even a
+// careless caller cannot persist a token.
 //
 // Production notes: events are also pushed to pluggable sinks (JSON lines
 // here; OpenTelemetry / OCSF / SIEM forwarders in production). The chain is
@@ -22,6 +24,7 @@ import Database from "better-sqlite3";
 import { createHash } from "node:crypto";
 import { appendFileSync } from "node:fs";
 import { nanoid } from "nanoid";
+import { scrubSecrets, scrubValue } from "./secret-patterns.js";
 
 export type AuditStream = "audit" | "user";
 export type ActorType = "user" | "agent" | "system" | "anonymous";
@@ -70,7 +73,8 @@ export function redactDetails(details: Record<string, unknown> | undefined): Rec
   for (const [k, v] of Object.entries(details)) {
     if (SENSITIVE_KEY.test(k)) out[k] = "[redacted]";
     else if (v && typeof v === "object" && !Array.isArray(v)) out[k] = redactDetails(v as Record<string, unknown>);
-    else out[k] = v;
+    else if (typeof v === "string") out[k] = scrubSecrets(v);
+    else out[k] = scrubValue(v);
   }
   return out;
 }

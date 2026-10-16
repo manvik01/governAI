@@ -139,3 +139,73 @@ test("old GOVERNAI_* variable names still work after the rename to ZenAi4", () =
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stderr, new RegExp(`Initialised ${db.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
 });
+
+// ------------------------------------------------------------ phase 1 commands
+
+test("phase 1 CLI: agent register (every field + expiry), apply idempotency, discovery triage, sweep", async () => {
+  const { dir, db, cli } = setup();
+  cli("init", "--admin-email", "ops@acme.test", "--admin-name", "Ops");
+  cli("user", "add", "--email", "ana@acme.test", "--name", "Ana", "--roles", "agent_owner");
+  cli("user", "add", "--email", "ben@acme.test", "--name", "Ben", "--roles", "agent_owner");
+  cli("user", "add", "--email", "sec@acme.test", "--name", "Sec", "--roles", "security_reviewer");
+  cli("user", "add", "--email", "ci@acme.test", "--name", "CI", "--roles", "ci_registrar");
+
+  const expires = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+  const reg = cli("agent", "register", "--as", "ana@acme.test", "--name", "DocReader", "--purpose", "Reads docs",
+    "--owner", "ana@acme.test", "--sub-owner", "ben@acme.test", "--profile", "internal-readonly", "--business-unit", "Ops",
+    "--platform", "custom", "--model-provider", "anthropic", "--model-version", "claude-haiku-4-5", "--autonomy", "A1",
+    "--tools", "read_docs:reversible", "--data-classes", "internal", "--expires-at", expires);
+  assert.equal(reg.code, 0, reg.err);
+  assert.match(reg.out, /^gai\.a\./, "credential on stdout only");
+  assert.match(reg.err, new RegExp(`expires ${expires}`));
+
+  const bad = cli("agent", "register", "--as", "ana@acme.test", "--name", "X", "--purpose", "p", "--owner", "ana@acme.test", "--sub-owner", "ben@acme.test",
+    "--profile", "internal-readonly", "--business-unit", "Ops", "--platform", "custom", "--model-provider", "anthropic", "--model-version", "claude-haiku-4-5",
+    "--autonomy", "A4", "--tools", "read_docs:reversible:internal");
+  assert.equal(bad.code, 1);
+  assert.match(bad.err, /autonomy A4 exceeds/);
+  assert.equal(cli("agent", "register", "--as", "ana@acme.test", "--tools", "x:maybe").code, 2);
+  assert.equal(cli("agent", "list", "--as", "nobody@acme.test").code, 0);
+  assert.equal(cli("agent", "submit", "--id", "x", "--as", "nobody@acme.test").code, 1, "--as must be an active user");
+
+  const yaml = join(dir, "agent.yaml");
+  writeFileSync(yaml, `apiVersion: zenai4/v1
+kind: Agent
+metadata: { id: ops.summariser, name: Summariser }
+spec:
+  purpose: Summarises tickets
+  owner: ana@acme.test
+  subOwner: ben@acme.test
+  businessUnit: Ops
+  platform: custom
+  model: { provider: anthropic, version: claude-haiku-4-5 }
+  accessProfile: internal-readonly
+  autonomy: A1
+  tools: [{ name: read_docs, reversible: true, dataClasses: [internal] }]
+  budget: {}
+`);
+  const a1 = cli("apply", "-f", yaml, "--as", "ci@acme.test");
+  assert.equal(a1.code, 0, a1.err);
+  assert.match(a1.out, /^created \S+ state=active tier=low/);
+  assert.match(cli("apply", "-f", yaml, "--as", "ci@acme.test").out, /^unchanged /);
+  assert.equal(cli("apply", "-f", yaml, "--as", "sec@acme.test").code, 1, "security reviewer is not an owner/admin/ci_registrar");
+
+  const csv = join(dir, "egress.csv");
+  writeFileSync(csv, "source_host,destination_domain,count,first_seen,last_seen\nbuild-1,api.openai.com,3,2026-10-01,2026-10-02\n");
+  assert.equal(cli("discovery", "import-egress", "--file", csv, "--as", "ana@acme.test").code, 1);
+  assert.match(cli("discovery", "import-egress", "--file", csv, "--as", "sec@acme.test").err, /matched=1/);
+  const id = cli("discovery", "list", "--triage").out.split(/\s+/)[0];
+  assert.ok(id);
+  assert.equal(cli("discovery", "assign-owner", "--id", id, "--owner", "ben@acme.test", "--as", "ana@acme.test").code, 1);
+  const claim = cli("discovery", "claim", "--id", id, "--as", "ben@acme.test");
+  assert.equal(claim.code, 0, claim.err);
+  assert.match(claim.err, /claimed -> draft \S+ owner=ben@acme.test/);
+  assert.equal(cli("discovery", "list", "--triage").out, "");
+  assert.equal(cli("sweep").code, 0);
+  assert.match(cli("discovery", "status").out, /expiry-sweep\s+every=1h\s+last=ok/);
+
+  const cp = buildControlPlane({ dbPath: db });
+  const acts = new Set(cp.audit.query({ stream: "user", limit: 5000 }).map((e) => e.action));
+  for (const a of ["cli.agent.register", "cli.apply", "agent.apply", "cli.discovery.import_egress", "cli.discovery.claim", "discovery.claim", "cli.sweep"]) assert.ok(acts.has(a), a);
+  cp.close();
+});

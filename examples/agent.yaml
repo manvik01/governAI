@@ -1,0 +1,39 @@
+# ZenAi4 agent manifest (registration as code).
+# Apply on every deploy:   zenai4-admin apply -f agent.yaml
+#   - metadata.id is the stable key: keep it forever, even if you rename the agent.
+#   - Identical manifest -> no-op. Changed manifest -> update. Widening access to a
+#     high/critical tier sends the agent back to security review.
+#   - Missing required fields -> the agent is created as a Draft.
+#   - Apply never prints an agent credential. The owner gets one with
+#     POST /v1/agents/<id>/credentials/rotate after activation.
+apiVersion: zenai4/v1
+kind: Agent
+metadata:
+  id: customer-success.refund-assistant
+  name: Refund Assistant
+  labels:
+    repo: acme/refund-assistant
+spec:
+  purpose: Drafts and issues customer refunds under $200 from the support queue
+  owner: alice@acme.com          # named human, active agent_owner in the directory
+  subOwner: bob@acme.com         # deputy; must be a different person
+  businessUnit: Customer Success
+  platform: custom               # custom | copilot-studio | gemini-enterprise | ...
+  model:
+    provider: anthropic
+    version: claude-sonnet-5
+    permitted: [claude-sonnet-5]
+  accessProfile: customer-facing # administrator-defined ceiling
+  autonomy: A2                   # A0 (suggest only) .. A4 (fully autonomous)
+  mode: enforcement              # or posture (observe only)
+  tools:
+    - name: read_invoice
+      reversible: true
+      dataClasses: [financial, customer_pii]
+    - name: issue_refund
+      reversible: false
+      dataClasses: [financial, customer_pii]
+  budget:
+    agentLimitMicro: 50000000        # $50 across the agent (integer micro-USD)
+    defaultTaskLimitMicro: 2000000   # $2 per task
+  # expiresAt: 2026-12-31        # optional; at most 90 days out. Default: 90 days from registration.

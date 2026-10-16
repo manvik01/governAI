@@ -1,0 +1,53 @@
+# Sample GitHub Actions workflow: register or update the agent on every deploy.
+#
+# Secrets (Settings -> Secrets and variables -> Actions):
+#   ZENAI4_URL    https://zenai4.internal.acme.com   (your gateway)
+#   ZENAI4_TOKEN  a user token for a directory user with the ci_registrar role
+#                 (zenai4-admin user add --email ci-refunds@acme.com --roles ci_registrar
+#                  zenai4-admin token issue --email ci-refunds@acme.com --ttl-hours 720)
+#
+# The token is only ever passed through the environment and the Authorization
+# header. It is never echoed, written to a file or passed on a command line.
+# GitHub masks secrets in logs, but do not rely on that alone.
+name: Register agent with ZenAi4
+
+on:
+  push:
+    branches: [main]
+    paths: [agent.yaml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zenai4-apply-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      # The token stays in an env var and reaches curl through a header read
+      # from stdin, so it never appears in argv (ps), the log or a file.
+      - name: Apply agent.yaml
+        env:
+          ZENAI4_URL: ${{ secrets.ZENAI4_URL }}
+          ZENAI4_TOKEN: ${{ secrets.ZENAI4_TOKEN }}
+        run: |
+          set -euo pipefail
+          printf 'Authorization: Bearer %s\n' "$ZENAI4_TOKEN" | \
+            curl --fail-with-body -sS -X POST "$ZENAI4_URL/v1/agents/apply" \
+              -H 'content-type: application/yaml' -H @- --data-binary @agent.yaml
+
+      # Alternative: if your runner image has ZenAi4 installed (do NOT use
+      # `npx zenai4-admin` - the CLI is not published to npm and an unscoped
+      # name could be squatted), the CLI's remote mode does the same:
+      #   ZENAI4_URL=... ZENAI4_TOKEN=... zenai4-admin apply -f agent.yaml

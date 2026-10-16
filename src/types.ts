@@ -21,6 +21,17 @@ export interface SecurityReview {
 
 export type RiskTier = "low" | "medium" | "high" | "critical";
 
+/** A human decision that moves an agent's risk tier away from the computed
+ * value. Owners may only raise; only a security reviewer may lower, and a
+ * lowering below the computed floor must carry a reason. */
+export interface RiskOverride {
+  tier: RiskTier;
+  direction: "raise" | "lower";
+  by: string;
+  reason?: string;
+  at: string;
+}
+
 export type AutonomyLevel = "A0" | "A1" | "A2" | "A3" | "A4";
 
 export type GovernanceMode = "enforcement" | "posture";
@@ -52,7 +63,11 @@ export interface Agent {
   platform: string; // e.g. "custom", "copilot-studio", "gemini-enterprise"
   modelProvider: string; // e.g. "anthropic", "openai", "google"
   modelVersion: string;
+  /** EFFECTIVE risk tier: computed tier adjusted by any override. */
   riskTier: RiskTier;
+  /** Tier the rules compute from tools, data classes and autonomy. */
+  computedRiskTier?: RiskTier;
+  riskOverride?: RiskOverride;
   /** Models this agent may invoke. A call naming any other model is blocked
    * before it reaches a provider — including fallback models. */
   permittedModels: string[];
@@ -61,7 +76,20 @@ export interface Agent {
   lifecycleState: LifecycleState;
   mode: GovernanceMode;
   createdAt: string;
+  updatedAt?: string;
+  /** Agents stop being accepted at this instant unless the owner recertifies. */
   expiresAt: string;
+  lastRecertifiedAt?: string;
+  recertifiedBy?: string;
+  suspendedReason?: string;
+  suspendedAt?: string;
+  retiredAt?: string;
+  /** Stable id from an agent.yaml manifest (registration as code). */
+  manifestId?: string;
+  /** Hash of the last applied manifest spec, so re-applying is a no-op. */
+  manifestHash?: string;
+  /** Discovery record this agent was claimed from, if any. */
+  discoveryId?: string;
 }
 
 export interface ToolGrant {

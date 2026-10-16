@@ -73,6 +73,15 @@ export class CredentialService {
     return this.issueAgentCredential(agentId, ttlDays);
   }
 
+  /** Moves the expiry of an agent's live credentials to `expiresAt` (never
+   * shortens). Used when an owner recertifies, so credential lifetime follows
+   * certification instead of forcing a rotation. Returns rows changed. */
+  extendAgentCredentials(agentId: string, expiresAt: string): number {
+    return this.db
+      .prepare(`UPDATE credentials SET expires_at = ? WHERE kind = 'agent' AND subject = ? AND revoked_at IS NULL AND expires_at < ?`)
+      .run(expiresAt, agentId, expiresAt).changes;
+  }
+
   revokeAll(kind: CredentialKind, subject: string, reason: string): number {
     return this.db
       .prepare(`UPDATE credentials SET revoked_at = ?, revoked_reason = ? WHERE kind = ? AND subject = ? AND revoked_at IS NULL`)
