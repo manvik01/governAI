@@ -4,8 +4,10 @@
 #   docker compose up -d                         (see compose.yaml and docs/deployment)
 #   docker compose exec gateway zenai4-admin init --admin-email you@company.com --admin-name "You"
 #
-# Single node only while the stores are on SQLite. More than one replica needs the
-# Postgres + Redis work in milestone M4 (docs/PRD.md section 10).
+# The same image runs three ways (see compose.yaml):
+#   gateway  node dist/gateway/secure-server.js   control plane (SQLite until its stores are ported)
+#   intake   node dist/intake/server.js           log intake + loader into Postgres (DATABASE_URL)
+#   migrate  zenai4-admin db migrate               one-shot, applies supabase/migrations
 
 ARG NODE_IMAGE=node:22-bookworm
 ARG NODE_RUNTIME_IMAGE=node:22-bookworm-slim
@@ -34,10 +36,12 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
+COPY proto ./proto
+COPY supabase/migrations ./supabase/migrations
 RUN mkdir -p /usr/local/bin \
  && ln -s /app/dist/control/admin-cli.js /usr/local/bin/zenai4-admin \
  && ln -s /app/dist/control/admin-cli.js /usr/local/bin/governai-admin \
- && mkdir -p /data /backups \
+ && mkdir -p /data /data/queue /backups \
  && chown -R node:node /data /backups
 USER node
 VOLUME ["/data"]

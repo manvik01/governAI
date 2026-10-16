@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "phase-*", "supabase-*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      # Same major version as the Supabase development project.
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    env:
+      ZENAI4_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --no-audit --no-fund
+      # Runs the existing suite plus the intake test (migrations, intake, loader, redaction, audit chain).
+      - run: npm test
+      - name: Migrations apply cleanly as a non-superuser (as on Supabase)
+        run: |
+          psql "$ZENAI4_TEST_DATABASE_URL" -c "CREATE ROLE migrator LOGIN CREATEROLE PASSWORD 'migrator'" -c "CREATE ROLE anon" -c "CREATE ROLE authenticated" -c "CREATE DATABASE ci_nonsuper OWNER migrator"
+          DATABASE_URL=postgres://migrator:migrator@localhost:5432/ci_nonsuper node dist/control/admin-cli.js db migrate
+          DATABASE_URL=postgres://migrator:migrator@localhost:5432/ci_nonsuper node dist/control/admin-cli.js db status
+      - name: Compose file is valid
+        run: ZENAI4_DB_OWNER_PASSWORD=x ZENAI4_DB_APP_PASSWORD=y docker compose -f compose.yaml config -q

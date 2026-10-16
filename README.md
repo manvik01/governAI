@@ -16,6 +16,19 @@ has a working example client so far (Claude Agent SDK). Those are later
 roadmap weeks. See the "Roadmap to a demo-ready proof of concept" section
 of the product spec doc for what comes next and in what order.
 
+## Capture agent logs into Postgres (phase 1)
+
+The product objective is now capture and reporting: ZenAi4 receives agents' OpenTelemetry
+and LiteLLM logs, strips content and personal data, and loads them into Postgres
+(bundled, the customer's own, or Supabase in development). See
+[docs/deployment/capture.md](docs/deployment/capture.md) for setup, `supabase/` for the
+schema, and `fixtures/agents/` for three working sample agents.
+
+```sh
+npm run intake                                   # needs DATABASE_URL; listens on :8788
+ZENAI4_TEST_DATABASE_URL=postgres://... npm test # includes the intake integration test
+```
+
 ## Run it in a container (local or on-premises)
 
 ```bash

@@ -1,0 +1,158 @@
+[
+    {
+        "kind": "span",
+        "name": "ChatCompletion",
+        "links": [
+        ],
+        "scope": {
+            "name": "openinference.instrumentation.openai",
+            "version": "0.1.65"
+        },
+        "events": [
+        ],
+        "spanId": "84884601075a7e16",
+        "status": {
+            "code": 1
+        },
+        "endTime": "2026-10-16T10:31:22.802Z",
+        "traceId": "208c862c0aa5ccffb5918887b3e5c7ca",
+        "resource": {
+            "service.name": "support-agent",
+            "telemetry.sdk.name": "opentelemetry",
+            "service.instance.id": "502cf56c-6d10-4560-8fa4-c3bcc550b118",
+            "telemetry.sdk.version": "1.45.1",
+            "deployment.environment": "fixture",
+            "telemetry.sdk.language": "python",
+            "zenai4.fixture.framework": "openinference-openai"
+        },
+        "spanKind": 1,
+        "startTime": "2026-10-16T10:31:22.787Z",
+        "attributes": {
+            "llm.system": "openai",
+            "llm.model_name": "gpt-4o-mini",
+            "input.mime_type": "application/json",
+            "output.mime_type": "application/json",
+            "llm.finish_reason": "tool_calls",
+            "llm.token_count.total": 64,
+            "llm.token_count.prompt": 52,
+            "openinference.span.kind": "LLM",
+            "llm.invocation_parameters": "{\"model\": \"gpt-4o-mini\"}",
+            "llm.token_count.completion": 12,
+            "llm.tools.0.tool.json_schema": "{\"type\": \"function\", \"function\": {\"name\": \"crm_lookup\", \"description\": \"Find a customer\", \"parameters\": {\"type\": \"object\", \"properties\": {\"order_id\": {\"type\": \"string\"}}}}}"
+        },
+        "parentSpanId": "8f7f23e6930a1937",
+        "endTimeUnixNano": "1792146682802344351",
+        "startTimeUnixNano": "1792146682787655854"
+    },
+    {
+        "kind": "span",
+        "name": "ChatCompletion",
+        "links": [
+        ],
+        "scope": {
+            "name": "openinference.instrumentation.openai",
+            "version": "0.1.65"
+        },
+        "events": [
+        ],
+        "spanId": "e056fb66149d3764",
+        "status": {
+            "code": 1
+        },
+        "endTime": "2026-10-16T10:31:22.806Z",
+        "traceId": "208c862c0aa5ccffb5918887b3e5c7ca",
+        "resource": {
+            "service.name": "support-agent",
+            "telemetry.sdk.name": "opentelemetry",
+            "service.instance.id": "502cf56c-6d10-4560-8fa4-c3bcc550b118",
+            "telemetry.sdk.version": "1.45.1",
+            "deployment.environment": "fixture",
+            "telemetry.sdk.language": "python",
+            "zenai4.fixture.framework": "openinference-openai"
+        },
+        "spanKind": 1,
+        "startTime": "2026-10-16T10:31:22.803Z",
+        "attributes": {
+            "llm.system": "openai",
+            "llm.model_name": "gpt-4o-mini",
+            "input.mime_type": "application/json",
+            "output.mime_type": "application/json",
+            "llm.finish_reason": "stop",
+            "llm.token_count.total": 84,
+            "llm.token_count.prompt": 72,
+            "openinference.span.kind": "LLM",
+            "llm.invocation_parameters": "{\"model\": \"gpt-4o-mini\"}",
+            "llm.token_count.completion": 12
+        },
+        "parentSpanId": "8f7f23e6930a1937",
+        "endTimeUnixNano": "1792146682806296382",
+        "startTimeUnixNano": "1792146682803618296"
+    },
+    {
+        "kind": "span",
+        "name": "crm_lookup",
+        "links": [
+        ],
+        "scope": {
+            "name": "support-agent"
+        },
+        "events": [
+        ],
+        "spanId": "e367c45b229e60d2",
+        "status": {
+        },
+        "endTime": "2026-10-16T10:31:22.802Z",
+        "traceId": "208c862c0aa5ccffb5918887b3e5c7ca",
+        "resource": {
+            "service.name": "support-agent",
+            "telemetry.sdk.name": "opentelemetry",
+            "service.instance.id": "502cf56c-6d10-4560-8fa4-c3bcc550b118",
+            "telemetry.sdk.version": "1.45.1",
+            "deployment.environment": "fixture",
+            "telemetry.sdk.language": "python",
+            "zenai4.fixture.framework": "openinference-openai"
+        },
+        "spanKind": 1,
+        "startTime": "2026-10-16T10:31:22.802Z",
+        "attributes": {
+            "tool.name": "crm_lookup",
+            "openinference.span.kind": "TOOL"
+        },
+        "parentSpanId": "8f7f23e6930a1937",
+        "endTimeUnixNano": "1792146682802530378",
+        "startTimeUnixNano": "1792146682802516893"
+    },
+    {
+        "kind": "span",
+        "name": "support-agent.run",
+        "links": [
+        ],
+        "scope": {
+            "name": "support-agent"
+        },
+        "events": [
+        ],
+        "spanId": "8f7f23e6930a1937",
+        "status": {
+        },
+        "endTime": "2026-10-16T10:31:22.806Z",
+        "traceId": "208c862c0aa5ccffb5918887b3e5c7ca",
+        "resource": {
+            "service.name": "support-agent",
+            "telemetry.sdk.name": "opentelemetry",
+            "service.instance.id": "502cf56c-6d10-4560-8fa4-c3bcc550b118",
+            "telemetry.sdk.version": "1.45.1",
+            "deployment.environment": "fixture",
+            "telemetry.sdk.language": "python",
+            "zenai4.fixture.framework": "openinference-openai"
+        },
+        "spanKind": 1,
+        "startTime": "2026-10-16T10:31:22.464Z",
+        "attributes": {
+            "agent.name": "support-agent",
+            "openinference.span.kind": "AGENT"
+        },
+        "endTimeUnixNano": "1792146682806329026",
+        "startTimeUnixNano": "1792146682464467022"
+    }
+]

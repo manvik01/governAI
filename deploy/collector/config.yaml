@@ -1,0 +1,107 @@
+# OpenTelemetry Collector (contrib distribution) in front of ZenAi4 intake.
+#
+# Receives agent telemetry three ways, strips prompt and output content and
+# secrets, and forwards to the intake with a per-source token. The sending queue
+# is persisted on disk, so a restart of the Collector or of ZenAi4 loses nothing
+# that was already accepted. Intake redacts again on arrival (defence in depth).
+#
+# Status: written for phase 1 and not yet run against a live Collector; validate
+# with `otelcol-contrib validate --config=config.yaml` on the first VM.
+
+extensions:
+  file_storage:
+    directory: /var/lib/otelcol
+    create_directory: true
+  health_check:
+    endpoint: 0.0.0.0:13133
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  # Custom agents that write JSON lines to files.
+  filelog:
+    include: [/var/log/agents/*.log, /var/log/agents/*.jsonl]
+    start_at: end
+    storage: file_storage
+    operators:
+      - type: json_parser
+        if: 'body matches "^\\s*\\{"'
+  syslog:
+    udp:
+      listen_address: 0.0.0.0:5514
+    protocol: rfc5424
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_percentage: 75
+    spike_limit_percentage: 20
+  # Drop prompt, completion and message content before anything leaves the Collector.
+  attributes/drop_content:
+    actions:
+      - { key: gen_ai.prompt, action: delete }
+      - { key: gen_ai.completion, action: delete }
+      - { key: gen_ai.input.messages, action: delete }
+      - { key: gen_ai.output.messages, action: delete }
+      - { key: gen_ai.system_instructions, action: delete }
+      - { key: gen_ai.tool.call.arguments, action: delete }
+      - { key: gen_ai.tool.call.result, action: delete }
+      - { key: input.value, action: delete }
+      - { key: output.value, action: delete }
+      - { key: llm.input_messages, action: delete }
+      - { key: llm.output_messages, action: delete }
+      - { key: traceloop.entity.input, action: delete }
+      - { key: traceloop.entity.output, action: delete }
+      - { key: pydantic_ai.all_messages, action: delete }
+      - { key: pydantic_ai.new_messages, action: delete }
+      - { key: final_result, action: delete }
+      - { key: model_request_parameters, action: delete }
+      - { pattern: "^gen_ai\\.(prompt|completion)\\..*", action: delete }
+      - { pattern: "^llm\\.(input|output)_messages\\..*", action: delete }
+  # Mask secret- and personal-data-shaped values in whatever remains.
+  redaction:
+    allow_all_keys: true
+    blocked_values:
+      - "sk-[A-Za-z0-9_-]{16,}"
+      - "AKIA[0-9A-Z]{16}"
+      - "Bearer [A-Za-z0-9._~+/=-]{8,}"
+      - "eyJ[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}"
+      - "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Za-z]{2,}"
+      - "\\b[STFGM][0-9]{7}[A-Z]\\b"
+    summary: silent
+  batch:
+    send_batch_size: 512
+    timeout: 2s
+
+exporters:
+  otlphttp/zenai4:
+    endpoint: ${env:ZENAI4_INTAKE_ENDPOINT}
+    encoding: proto
+    compression: gzip
+    headers:
+      authorization: "Bearer ${env:ZENAI4_COLLECTOR_TOKEN}"
+    retry_on_failure:
+      enabled: true
+      initial_interval: 1s
+      max_interval: 30s
+      max_elapsed_time: 0        # never give up; the persistent queue holds the data
+    sending_queue:
+      enabled: true
+      storage: file_storage
+      queue_size: 5000
+
+service:
+  extensions: [file_storage, health_check]
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, attributes/drop_content, redaction, batch]
+      exporters: [otlphttp/zenai4]
+    logs:
+      receivers: [otlp, filelog, syslog]
+      processors: [memory_limiter, attributes/drop_content, redaction, batch]
+      exporters: [otlphttp/zenai4]

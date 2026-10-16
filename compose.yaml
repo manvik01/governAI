@@ -1,19 +1,110 @@
 # ZenAi4 - run locally (laptop or a single server, no TLS).
 #
-#   cp .env.example .env            # then set ZENAI4_BACKUP_KEY
+#   cp .env.example .env            # then fill in the passwords and ZENAI4_BACKUP_KEY
 #   docker compose up -d --build
+#   docker compose exec intake zenai4-admin source add collector --kind otlp
+#   # put the printed token in .env as ZENAI4_COLLECTOR_TOKEN, then: docker compose up -d collector
 #   docker compose exec gateway zenai4-admin init --admin-email you@company.com --admin-name "Your Name"
 #
-# The gateway is published on 127.0.0.1 only. For other machines to reach it,
-# use the on-premises setup with TLS in deploy/onprem/ instead of opening this port.
+# Services:
+#   postgres   bundled database (profile bundled-db, on by default via COMPOSE_PROFILES in .env).
+#              To use your own Postgres or Supabase instead, remove bundled-db from COMPOSE_PROFILES
+#              and set DATABASE_URL / ZENAI4_MIGRATE_DATABASE_URL to it.
+#   migrate    one-shot: applies supabase/migrations, sets the app role's password, then exits
+#   intake     receives agent logs (OTLP, LiteLLM), queues them on disk, loads them into Postgres
+#   collector  OpenTelemetry Collector in front of intake: OTLP, files, syslog; redaction; disk buffer
+#   gateway    control plane (registry, policies, audit); its stores move to Postgres in step 1.3
+#
+# Only 127.0.0.1 is published. For other machines to reach it, use deploy/onprem/ with TLS.
 
 name: zenai4
 
+x-hardening: &hardening
+  read_only: true
+  tmpfs: [/tmp]
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+
 services:
-  gateway:
+  postgres:
+    image: ${ZENAI4_POSTGRES_IMAGE:-postgres:17}
+    profiles: [bundled-db]
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: zenai4
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${ZENAI4_DB_OWNER_PASSWORD:?set ZENAI4_DB_OWNER_PASSWORD in .env}
+    volumes:
+      - zenai4-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d zenai4"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 60s
+
+  migrate:
     build: .
     image: zenai4:local
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy, required: false }
+    environment:
+      DATABASE_URL: ${ZENAI4_MIGRATE_DATABASE_URL:-postgres://postgres:${ZENAI4_DB_OWNER_PASSWORD}@postgres:5432/zenai4}
+      ZENAI4_DB_APP_PASSWORD: ${ZENAI4_DB_APP_PASSWORD:?set ZENAI4_DB_APP_PASSWORD in .env}
+      ZENAI4_DB_REPORT_PASSWORD: ${ZENAI4_DB_REPORT_PASSWORD:-}
+    command: ["sh", "-c", "zenai4-admin db migrate && zenai4-admin db init-roles && zenai4-admin db partitions"]
+    <<: *hardening
+
+  intake:
+    image: zenai4:local
     restart: unless-stopped
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${DATABASE_URL:-postgres://zenai4_app:${ZENAI4_DB_APP_PASSWORD}@postgres:5432/zenai4}
+      ZENAI4_QUEUE_DIR: /data/queue
+      ZENAI4_INTAKE_PORT: "8788"
+    command: ["node", "dist/intake/server.js"]
+    ports:
+      - "127.0.0.1:${ZENAI4_INTAKE_HOST_PORT:-8788}:8788"
+    volumes:
+      - zenai4-queue:/data/queue
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    stop_grace_period: 30s
+    <<: *hardening
+
+  collector:
+    # Pin to a current contrib release before a pilot; check https://github.com/open-telemetry/opentelemetry-collector-releases/releases
+    image: ${ZENAI4_OTELCOL_IMAGE:-otel/opentelemetry-collector-contrib:latest}
+    restart: unless-stopped
+    depends_on: [intake]
+    command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      ZENAI4_INTAKE_ENDPOINT: http://intake:8788
+      ZENAI4_COLLECTOR_TOKEN: ${ZENAI4_COLLECTOR_TOKEN:-}
+    volumes:
+      - ./deploy/collector/config.yaml:/etc/otelcol/config.yaml:ro
+      - zenai4-otelcol:/var/lib/otelcol
+      - ${ZENAI4_AGENT_LOG_DIR:-./deploy/collector/empty-logs}:/var/log/agents:ro
+    ports:
+      - "127.0.0.1:4317:4317"     # OTLP gRPC
+      - "127.0.0.1:4318:4318"     # OTLP HTTP
+      - "127.0.0.1:5514:5514/udp" # syslog
+    <<: *hardening
+
+  gateway:
+    image: zenai4:local
+    restart: unless-stopped
+    depends_on:
+      migrate: { condition: service_completed_successfully }
     env_file:
       - path: .env
         required: false
@@ -27,13 +118,12 @@ services:
     volumes:
       - zenai4-data:/data
       - zenai4-backups:/backups
-    read_only: true
-    tmpfs:
-      - /tmp
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
     stop_grace_period: 30s
+    <<: *hardening
 
 volumes:
   zenai4-data:
   zenai4-backups:
+  zenai4-pg:
+  zenai4-queue:
+  zenai4-otelcol:

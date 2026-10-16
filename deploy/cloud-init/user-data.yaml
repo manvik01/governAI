@@ -1,0 +1,59 @@
+#cloud-config
+# ZenAi4 on a fresh Ubuntu LTS VM (24.04): Docker, the repo, generated secrets,
+# bundled Postgres, intake and Collector. Paste as user data when creating the VM.
+#
+# Before use, set the two values in /etc/zenai4/install.env below:
+#   ZENAI4_REPO   git URL the VM can clone (private repo: use a deploy key or token URL)
+#   ZENAI4_REF    branch or tag to run
+# To use your own Postgres or Supabase instead of the bundled one, edit
+# /opt/zenai4/.env after first boot as described in .env.example, then
+# `docker compose up -d` again.
+#
+# Status: written for phase 1; first tested on a real VM in phase 5 (step 9 of the build plan).
+
+package_update: true
+packages: [ca-certificates, curl, git, openssl]
+
+write_files:
+  - path: /etc/zenai4/install.env
+    permissions: "0600"
+    content: |
+      ZENAI4_REPO=https://github.com/manvik01/governAI.git
+      ZENAI4_REF=main
+
+  - path: /usr/local/sbin/zenai4-install
+    permissions: "0750"
+    content: |
+      #!/bin/sh
+      set -eu
+      . /etc/zenai4/install.env
+      # Docker Engine + Compose plugin from Docker's own apt repository.
+      if ! command -v docker >/dev/null; then
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+        apt-get update -q && apt-get install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin
+      fi
+      [ -d /opt/zenai4/.git ] || git clone --depth 1 --branch "$ZENAI4_REF" "$ZENAI4_REPO" /opt/zenai4
+      cd /opt/zenai4
+      if [ ! -f .env ]; then
+        cp .env.example .env
+        gen() { openssl rand -base64 24 | tr -d '/+=' ; }
+        sed -i "s|^ZENAI4_BACKUP_KEY=.*|ZENAI4_BACKUP_KEY=$(openssl rand -base64 32)|" .env
+        sed -i "s|^ZENAI4_DB_OWNER_PASSWORD=.*|ZENAI4_DB_OWNER_PASSWORD=$(gen)|" .env
+        sed -i "s|^ZENAI4_DB_APP_PASSWORD=.*|ZENAI4_DB_APP_PASSWORD=$(gen)|" .env
+        sed -i "s|^ZENAI4_PSEUDONYM_SALT=.*|ZENAI4_PSEUDONYM_SALT=$(gen)|" .env
+        chmod 600 .env
+      fi
+      docker compose up -d --build postgres migrate intake gateway
+      # First source token for the bundled Collector, written straight into .env.
+      if ! grep -q '^ZENAI4_COLLECTOR_TOKEN=zi4s_' .env; then
+        for i in $(seq 1 30); do docker compose exec -T intake node -e "process.exit(0)" 2>/dev/null && break; sleep 2; done
+        TOKEN=$(docker compose exec -T intake zenai4-admin source add collector --kind otlp | tail -1)
+        sed -i "s|^ZENAI4_COLLECTOR_TOKEN=.*|ZENAI4_COLLECTOR_TOKEN=$TOKEN|" .env
+      fi
+      docker compose up -d collector
+      echo "ZenAi4 is running. Agents send OTLP to this VM on 4317 (gRPC) or 4318 (HTTP) once deploy/onprem exposes them."
+
+runcmd:
+  - [/usr/local/sbin/zenai4-install]

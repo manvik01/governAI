@@ -7,3 +7,6 @@ deploy/onprem/.env
 deploy/onprem/certs/*
 !deploy/onprem/certs/.gitkeep
 *.bak
+data/
+__pycache__/
+*.pyc

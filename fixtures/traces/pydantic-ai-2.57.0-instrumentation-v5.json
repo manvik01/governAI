@@ -1,0 +1,187 @@
+[
+    {
+        "kind": "span",
+        "name": "chat gpt-4o-mini",
+        "links": [
+        ],
+        "scope": {
+            "name": "pydantic-ai",
+            "version": "2.57.0"
+        },
+        "events": [
+        ],
+        "spanId": "b06423a9330eb54f",
+        "status": {
+        },
+        "endTime": "2026-10-16T10:31:20.935Z",
+        "traceId": "5e1e2837a5fc606c9cdc76a5d605dac0",
+        "resource": {
+            "service.name": "refund-bot",
+            "telemetry.sdk.name": "opentelemetry",
+            "service.instance.id": "1c9339c4-d84a-4c7e-9d96-80c4354afe20",
+            "telemetry.sdk.version": "1.45.1",
+            "deployment.environment": "fixture",
+            "telemetry.sdk.language": "python",
+            "zenai4.fixture.framework": "pydantic-ai"
+        },
+        "spanKind": 3,
+        "startTime": "2026-10-16T10:31:20.884Z",
+        "attributes": {
+            "server.port": 18080,
+            "gen_ai.system": "openai",
+            "operation.cost": 0.0000165,
+            "server.address": "127.0.0.1",
+            "gen_ai.agent.name": "refund-bot",
+            "gen_ai.response.id": "chatcmpl-1792146680920",
+            "logfire.json_schema": "{\"type\":\"object\",\"properties\":{\"gen_ai.input.messages\":{\"type\":\"array\"},\"gen_ai.output.messages\":{\"type\":\"array\"},\"gen_ai.system_instructions\":{\"type\":\"array\"},\"model_request_parameters\":{\"type\":\"object\"}}}",
+            "gen_ai.agent.call.id": "01a14444-2c24-703e-a17b-fd9fb7ff0000",
+            "gen_ai.provider.name": "openai",
+            "gen_ai.request.model": "gpt-4o-mini",
+            "gen_ai.operation.name": "chat",
+            "gen_ai.response.model": "gpt-4o-mini",
+            "gen_ai.conversation.id": "01a14444-2c24-703e-a17b-fda066f38f3f",
+            "gen_ai.tool.definitions": "[{\"type\":\"function\",\"name\":\"lookup_order\",\"description\":\"Look up an order by id.\",\"parameters\":{\"additionalProperties\":false,\"properties\":{\"order_id\":{\"type\":\"string\"}},\"required\":[\"order_id\"],\"type\":\"object\"}}]",
+            "gen_ai.usage.input_tokens": 62,
+            "gen_ai.usage.output_tokens": 12,
+            "gen_ai.response.finish_reasons": [
+                "tool_call"
+            ]
+        },
+        "parentSpanId": "9b9e76b97484cc9e",
+        "endTimeUnixNano": "1792146680935487587",
+        "startTimeUnixNano": "1792146680884296895"
+    },
+    {
+        "kind": "span",
+        "name": "execute_tool lookup_order",
+        "links": [
+        ],
+        "scope": {
+            "name": "pydantic-ai",
+            "version": "2.57.0"
+        },
+        "events": [
+        ],
+        "spanId": "84ab4477f9c9b084",
+        "status": {
+        },
+        "endTime": "2026-10-16T10:31:20.938Z",
+        "traceId": "5e1e2837a5fc606c9cdc76a5d605dac0",
+        "resource": {
+            "service.name": "refund-bot",
+            "telemetry.sdk.name": "opentelemetry",
+            "service.instance.id": "1c9339c4-d84a-4c7e-9d96-80c4354afe20",
+            "telemetry.sdk.version": "1.45.1",
+            "deployment.environment": "fixture",
+            "telemetry.sdk.language": "python",
+            "zenai4.fixture.framework": "pydantic-ai"
+        },
+        "spanKind": 1,
+        "startTime": "2026-10-16T10:31:20.937Z",
+        "attributes": {
+            "gen_ai.tool.name": "lookup_order",
+            "gen_ai.agent.name": "refund-bot",
+            "gen_ai.tool.call.id": "call_1",
+            "logfire.json_schema": "{\"type\":\"object\",\"properties\":{\"gen_ai.tool.call.arguments\":{\"type\":\"object\"},\"gen_ai.tool.call.result\":{\"type\":\"object\"},\"gen_ai.tool.name\":{},\"gen_ai.tool.call.id\":{}}}",
+            "gen_ai.agent.call.id": "01a14444-2c24-703e-a17b-fd9fb7ff0000",
+            "gen_ai.operation.name": "execute_tool",
+            "gen_ai.conversation.id": "01a14444-2c24-703e-a17b-fda066f38f3f"
+        },
+        "parentSpanId": "9b9e76b97484cc9e",
+        "endTimeUnixNano": "1792146680938622396",
+        "startTimeUnixNano": "1792146680937442716"
+    },
+    {
+        "kind": "span",
+        "name": "chat gpt-4o-mini",
+        "links": [
+        ],
+        "scope": {
+            "name": "pydantic-ai",
+            "version": "2.57.0"
+        },
+        "events": [
+        ],
+        "spanId": "1703b65e2d90e138",
+        "status": {
+        },
+        "endTime": "2026-10-16T10:31:20.948Z",
+        "traceId": "5e1e2837a5fc606c9cdc76a5d605dac0",
+        "resource": {
+            "service.name": "refund-bot",
+            "telemetry.sdk.name": "opentelemetry",
+            "service.instance.id": "1c9339c4-d84a-4c7e-9d96-80c4354afe20",
+            "telemetry.sdk.version": "1.45.1",
+            "deployment.environment": "fixture",
+            "telemetry.sdk.language": "python",
+            "zenai4.fixture.framework": "pydantic-ai"
+        },
+        "spanKind": 3,
+        "startTime": "2026-10-16T10:31:20.940Z",
+        "attributes": {
+            "server.port": 18080,
+            "gen_ai.system": "openai",
+            "operation.cost": 0.0000195,
+            "server.address": "127.0.0.1",
+            "gen_ai.agent.name": "refund-bot",
+            "gen_ai.response.id": "chatcmpl-1792146680946",
+            "logfire.json_schema": "{\"type\":\"object\",\"properties\":{\"gen_ai.input.messages\":{\"type\":\"array\"},\"gen_ai.output.messages\":{\"type\":\"array\"},\"gen_ai.system_instructions\":{\"type\":\"array\"},\"model_request_parameters\":{\"type\":\"object\"}}}",
+            "gen_ai.agent.call.id": "01a14444-2c24-703e-a17b-fd9fb7ff0000",
+            "gen_ai.provider.name": "openai",
+            "gen_ai.request.model": "gpt-4o-mini",
+            "gen_ai.operation.name": "chat",
+            "gen_ai.response.model": "gpt-4o-mini",
+            "gen_ai.conversation.id": "01a14444-2c24-703e-a17b-fda066f38f3f",
+            "gen_ai.tool.definitions": "[{\"type\":\"function\",\"name\":\"lookup_order\",\"description\":\"Look up an order by id.\",\"parameters\":{\"additionalProperties\":false,\"properties\":{\"order_id\":{\"type\":\"string\"}},\"required\":[\"order_id\"],\"type\":\"object\"}}]",
+            "gen_ai.usage.input_tokens": 82,
+            "gen_ai.usage.output_tokens": 12,
+            "gen_ai.response.finish_reasons": [
+                "stop"
+            ]
+        },
+        "parentSpanId": "9b9e76b97484cc9e",
+        "endTimeUnixNano": "1792146680948275308",
+        "startTimeUnixNano": "1792146680940143713"
+    },
+    {
+        "kind": "span",
+        "name": "invoke_agent refund-bot",
+        "links": [
+        ],
+        "scope": {
+            "name": "pydantic-ai",
+            "version": "2.57.0"
+        },
+        "events": [
+        ],
+        "spanId": "9b9e76b97484cc9e",
+        "status": {
+        },
+        "endTime": "2026-10-16T10:31:20.949Z",
+        "traceId": "5e1e2837a5fc606c9cdc76a5d605dac0",
+        "resource": {
+            "service.name": "refund-bot",
+            "telemetry.sdk.name": "opentelemetry",
+            "service.instance.id": "1c9339c4-d84a-4c7e-9d96-80c4354afe20",
+            "telemetry.sdk.version": "1.45.1",
+            "deployment.environment": "fixture",
+            "telemetry.sdk.language": "python",
+            "zenai4.fixture.framework": "pydantic-ai"
+        },
+        "spanKind": 1,
+        "startTime": "2026-10-16T10:31:20.881Z",
+        "attributes": {
+            "agent_name": "refund-bot",
+            "model_name": "gpt-4o-mini",
+            "gen_ai.agent.name": "refund-bot",
+            "logfire.json_schema": "{\"type\":\"object\",\"properties\":{\"pydantic_ai.all_messages\":{\"type\":\"array\"},\"gen_ai.system_instructions\":{\"type\":\"array\"},\"final_result\":{\"type\":\"object\"}}}",
+            "gen_ai.agent.call.id": "01a14444-2c24-703e-a17b-fd9fb7ff0000",
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.conversation.id": "01a14444-2c24-703e-a17b-fda066f38f3f",
+            "gen_ai.aggregated_usage.input_tokens": 144,
+            "gen_ai.aggregated_usage.output_tokens": 24
+        },
+        "endTimeUnixNano": "1792146680949556733",
+        "startTimeUnixNano": "1792146680881730871"
+    }
+]
