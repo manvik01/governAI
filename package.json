@@ -14,9 +14,10 @@
     "mcp:approve": "npm run build && node dist/mcp/approve.js",
     "agent:claude": "npm run build && node dist/demo/claude-agent-demo.js",
     "context:demo": "npm run build && node dist/orchestration/demo.js",
-    "test": "npm run build && node --test --test-force-exit dist/budget/budget.test.js dist/control/control.test.js dist/control/admin-mcp.test.js",
+    "test": "npm run build && node --test --test-force-exit dist/budget/budget.test.js dist/control/control.test.js dist/control/admin-mcp.test.js dist/control/admin-cli.test.js",
     "budget:demo": "npm run build && node dist/budget/demo.js",
-    "server:dev": "npm run build && node dist/gateway/server.js"
+    "server:dev": "npm run build && node dist/gateway/server.js",
+    "admin": "node dist/control/admin-cli.js"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.283",
@@ -31,5 +32,8 @@
     "@types/express": "^4.17.21",
     "@types/node": "^22.7.4",
     "typescript": "^5.6.2"
+  },
+  "bin": {
+    "governai-admin": "dist/control/admin-cli.js"
   }
 }

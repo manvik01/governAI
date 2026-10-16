@@ -16,6 +16,17 @@ has a working example client so far (Claude Agent SDK). Those are later
 roadmap weeks. See the "Roadmap to a demo-ready proof of concept" section
 of the product spec doc for what comes next and in what order.
 
+## Run it in a container (local or on-premises)
+
+```bash
+cp .env.example .env        # set GOVERNAI_BACKUP_KEY=$(openssl rand -base64 32)
+docker compose up -d --build
+docker compose exec gateway governai-admin init --admin-email you@company.com --admin-name "Your Name"
+```
+
+The gateway listens on `127.0.0.1:8787`. For a server other machines reach over TLS, use
+`deploy/onprem/`. Full guide: [`docs/deployment/local-and-onprem.md`](docs/deployment/local-and-onprem.md).
+
 ## Requirements
 
 - Node.js 20 or later
@@ -172,9 +183,9 @@ PRD, with the decisions taken on each gap in the original, is in
 ## Agent onboarding, authenticated gateway, audit and security monitoring
 
 ```bash
-npm test                       # 31 tests across budget and control plane
+npm test                       # 39 tests across budget, control plane, admin CLI and MCP admin
 GOVERNAI_DB_PATH=./governai.db npm run server   # authenticated gateway on :8787
-docker build -t governai-gateway .              # container (Dockerfile not yet built in CI)
+docker compose up -d --build                    # container; see docs/deployment/local-and-onprem.md
 ```
 
 - `src/control/registration.ts` — owner and sub-owner verified against an identity

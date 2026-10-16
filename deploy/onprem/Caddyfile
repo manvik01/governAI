@@ -1,0 +1,18 @@
+# TLS termination for governAI. Pick ONE tls line:
+#   tls internal                         Caddy's own CA - fine for a pilot; clients must trust it
+#   tls /certs/cert.pem /certs/key.pem   your company certificate (put files in ./certs)
+{$GOVERNAI_HOSTNAME} {
+	tls internal
+
+	request_body {
+		max_size 1MB
+	}
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000"
+		X-Content-Type-Options nosniff
+	}
+
+	reverse_proxy gateway:8787
+}

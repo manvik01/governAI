@@ -1,0 +1,39 @@
+# governAI - run locally (laptop or a single server, no TLS).
+#
+#   cp .env.example .env            # then set GOVERNAI_BACKUP_KEY
+#   docker compose up -d --build
+#   docker compose exec gateway governai-admin init --admin-email you@company.com --admin-name "Your Name"
+#
+# The gateway is published on 127.0.0.1 only. For other machines to reach it,
+# use the on-premises setup with TLS in deploy/onprem/ instead of opening this port.
+
+name: governai
+
+services:
+  gateway:
+    build: .
+    image: governai:local
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      GOVERNAI_DB_PATH: /data/governai.db
+      GOVERNAI_SIEM_PATH: /data/audit-siem.jsonl
+      PORT: "8787"
+      TRUST_PROXY: "0"           # never 1 without a proxy in front: clients could forge their address
+    ports:
+      - "127.0.0.1:${GOVERNAI_PORT:-8787}:8787"
+    volumes:
+      - governai-data:/data
+      - governai-backups:/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+
+volumes:
+  governai-data:
+  governai-backups:

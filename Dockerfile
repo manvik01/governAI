@@ -1,21 +1,32 @@
-# governAI secure gateway - stateless container, state lives in the database volume.
+# governAI gateway - one stateless container; all state lives in the /data volume.
 #
-#   docker build -t governai-gateway .
-#   docker run -p 8787:8787 -v governai-data:/data governai-gateway
+#   docker build -t governai:local .
+#   docker compose up -d                         (see compose.yaml and docs/deployment)
+#   docker compose exec gateway governai-admin init --admin-email you@company.com --admin-name "You"
 #
-# Scale-out note: SQLite is single-node. To run several replicas behind a load
-# balancer, point GOVERNAI_DB_PATH at shared storage only for a single writer,
-# or (the intended path) move the stores to Postgres - see docs/PRD.md section 7.
+# Single node only while the stores are on SQLite. More than one replica needs the
+# Postgres + Redis work in milestone M4 (docs/PRD.md section 10).
 
-FROM node:22-bookworm AS build
+ARG NODE_IMAGE=node:22-bookworm
+ARG NODE_RUNTIME_IMAGE=node:22-bookworm-slim
+
+# ---- build: compile TypeScript and the native SQLite driver
+FROM ${NODE_IMAGE} AS build
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm ci
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY tsconfig.json ./
 COPY src ./src
-RUN npm run build && npm prune --omit=dev
+RUN npm run build \
+ && npm prune --omit=dev \
+ && rm -f dist/*/*.test.js dist/budget/race-worker.js \
+ && chmod 0755 dist/control/admin-cli.js
 
-FROM node:22-bookworm-slim
+# ---- runtime: no compiler, no dev dependencies, non-root
+FROM ${NODE_RUNTIME_IMAGE}
+LABEL org.opencontainers.image.title="governAI gateway" \
+      org.opencontainers.image.description="Governance control plane for AI agents" \
+      org.opencontainers.image.source="https://github.com/manvik01/governAI"
 ENV NODE_ENV=production \
     PORT=8787 \
     GOVERNAI_DB_PATH=/data/governai.db
@@ -23,11 +34,15 @@ WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
-RUN mkdir -p /data && chown -R node:node /data /app
+RUN mkdir -p /usr/local/bin \
+ && ln -s /app/dist/control/admin-cli.js /usr/local/bin/governai-admin \
+ && mkdir -p /data /backups \
+ && chown -R node:node /data /backups
 USER node
 VOLUME ["/data"]
 EXPOSE 8787
-HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+process.env.PORT+'/readyz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-# SIGTERM is handled for graceful drain, so autoscalers can remove replicas safely.
+# The gateway drains in-flight requests on SIGTERM before exiting.
+STOPSIGNAL SIGTERM
 CMD ["node", "dist/gateway/secure-server.js"]

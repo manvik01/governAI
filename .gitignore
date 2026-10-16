@@ -2,3 +2,8 @@ node_modules/
 dist/
 *.db
 *.db-*
+.env
+deploy/onprem/.env
+deploy/onprem/certs/*
+!deploy/onprem/certs/.gitkeep
+*.bak

@@ -1,0 +1,69 @@
+# governAI - on-premises: gateway behind a TLS reverse proxy (Caddy).
+#
+#   cd deploy/onprem
+#   cp ../../.env.example .env      # set GOVERNAI_BACKUP_KEY and GOVERNAI_HOSTNAME
+#   docker compose up -d --build
+#   docker compose exec gateway governai-admin init --admin-email you@company.com --admin-name "Your Name"
+#
+# Only the proxy publishes ports. The gateway is reachable only on the internal
+# network, which is why TRUST_PROXY=1 is safe here: every request has passed
+# Caddy, which discards client-supplied X-Forwarded-For headers and sets its own.
+
+name: governai
+
+services:
+  gateway:
+    build: ../..
+    image: governai:local
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      GOVERNAI_DB_PATH: /data/governai.db
+      GOVERNAI_SIEM_PATH: /data/audit-siem.jsonl
+      PORT: "8787"
+      TRUST_PROXY: "1"
+    expose: ["8787"]
+    networks: [internal]
+    volumes:
+      - governai-data:/data
+      - governai-backups:/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      GOVERNAI_HOSTNAME: ${GOVERNAI_HOSTNAME:?set GOVERNAI_HOSTNAME in .env}
+    ports:
+      - "443:443"
+      - "80:80"
+    networks: [internal, edge]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+
+networks:
+  internal:
+    internal: true      # no route to the internet from the gateway's network
+  edge: {}
+
+volumes:
+  governai-data:
+  governai-backups:
+  caddy-data:
+  caddy-config:

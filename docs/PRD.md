@@ -183,7 +183,7 @@ keys; TLS terminated at the ingress with mTLS to agents where required.
 |---|---|---|
 | F1 Registration, identity, review, credentials | Built (first slice) | `src/control/registration.ts`, `credentials.ts`, `access-profiles.ts`; tests in `control.test.ts` |
 | F2 Authenticated gateway | Built (first slice) | `src/gateway/secure-server.ts` |
-| F3 Container and scaling | Dockerfile, health checks, graceful shutdown written; **Dockerfile not yet built or run**; multi-replica needs Postgres and Redis | `Dockerfile` |
+| F3 Container and scaling | Single-node container built and run end to end (local Compose); on-premises Compose with TLS proxy written, not yet run; bootstrap admin CLI and encrypted backup built; multi-replica needs Postgres and Redis | `Dockerfile`, `compose.yaml`, `deploy/onprem/`, `src/control/admin-cli.ts` |
 | F4 Monitoring and logging | Built | `audit-log.ts`, `security-monitor.ts` |
 | F5 Token consumption | Built | `src/budget/`; 16 tests |
 | F6 Context and orchestration | Built (demo-level) | `src/context/`, `src/orchestration/` |
