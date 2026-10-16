@@ -202,23 +202,33 @@ keys; TLS terminated at the ingress with mTLS to agents where required.
 
 ## 10. Milestones (revised 16 October 2026)
 
-A market review (Microsoft Agent 365 and AWS AgentCore Policy now generally available, LiteLLM
-already enforcing budgets for free, Cyera buying Oasis for about $1B) changed the order of work.
-The MVP now leads with discovery, ownership and MAS-mapped evidence for regulated APAC firms.
-Enforcement plugs into gateways customers already run. The full plan with exit tests is in the
-MVP spec doc; this table is the build order for the repository.
+**Product objective:** a customer runs governAI on one lightweight VM that captures its AI agents'
+logs and deciphers them into operational reports (activity, reliability, cost, governance, weekly
+operations report). Discovery, ownership and MAS-mapped evidence are built from the same logs.
+Enforcement comes after the pilot. Market context: Microsoft Agent 365 and AWS AgentCore Policy
+are generally available, LiteLLM already enforces budgets, and self-hosted LLM observability tools
+(Langfuse, Phoenix, Helicone) target developers and need ClickHouse, Postgres and Redis. governAI
+targets operations and risk owners on one small VM. Full plan with exit tests: the MVP spec doc.
+
+Architecture on the VM: OpenTelemetry Collector (OTLP, file, syslog receivers; redaction; buffer)
+-> governAI intake (token per source, disk queue, batch counted in the audit chain) -> decipher
+(canonical event schema, mapping for each OpenTelemetry GenAI convention generation, agent
+identification, run reconstruction, error classes, cost) -> daily Parquet files queried with
+DuckDB, plus SQLite for registry, owners and audit chain -> reports, console, PDF/email/Slack,
+CSV and SIEM export. Starting VM target to be measured: 2 vCPU, 4 GB RAM, 50 GB disk.
 
 | Phase | Weeks | Build | Exit test |
 |---|---|---|---|
-| 0 Validate and clear | 0-1 | No code. Employer IP clearance; 10 interviews with Singapore FI security, AI platform and model-risk leads | 6 of 10 rank agent inventory or MAS accountability in their top three problems; 2 pilot letters |
-| 1 Discover | 1-3 | Connector interface (read-only, scheduled, audited); GitHub, LiteLLM, OpenAI and Anthropic admin, AWS AgentCore, Microsoft Graph connectors in the partner's order; duplicate merge; shadow queue and ownership claims | Seeded agents in 2 sources all found, merged and queued; connector credentials encrypted |
-| 2 Own and recertify | 3-5 | Re-review on new tool, scope, data class or model; approval expiry and recertification; decommissioning with revocation evidence; credential metadata inventory (never secrets) | Tests prove each trigger, expiry suspension and revocation evidence |
-| 3 Prove | 5-7 | MAS AI Risk Management Guidelines control map as versioned YAML (adviser-reviewed); per-agent materiality assessment; evidence pack (PDF + JSON lines with chain proof); gap report | Partner's risk lead would use the sample pack |
-| 4 Enforce through connectors | 7-9 | One decision API for all adapters; LiteLLM pre- and post-call hooks; harden MCP proxy; shadow mode with would-have-blocked report; optional Cedar export for AgentCore | One real path in shadow 7 days, then enforced; added latency measured |
-| 5 Operate | 9-10 | Console (inventory and shadow queue, agent detail, review queue, evidence and gaps, alerts); Slack approvals; pilot runbook | Browser test: discover, claim, review, export on a fresh container |
-| 6 Pilot | 10-12 | On-premises install at the partner; week-1 readout; weekly findings | Success criteria met and paid conversion agreed |
+| 0 Validate and clear | 0-1 | No code. Employer IP clearance; 10 interviews on where agent logs go and which weekly report is missing | 6 of 10 cannot produce a weekly view of agent activity, failures and cost; 2 agree to a VM pilot |
+| 1 Capture | 1-3 | Compose stack with OpenTelemetry Collector; cloud-init; intake endpoint with per-source tokens and disk queue; LiteLLM callback and spend-log import; three sample agents as fixtures; load test | Three sample agents' logs arrive; restart mid-burst loses nothing; rate measured against 1M events a day |
+| 2 Decipher | 3-5 | Canonical schema; Parquet + DuckDB; convention mapping with recorded traces per framework and version; agent identification with confidence; run reconstruction; error classes; cost; redaction test | Identical canonical events from every framework; sample week's cost within 2% of the invoice |
+| 3 Report | 5-7 | Activity, reliability, cost, governance and weekly operations reports as SQL views; console pages; HTML/PDF; SMTP and Slack schedules; CSV and SIEM | Partner's ops lead names an action a weekly report led to |
+| 4 Own and prove | 7-9 | Shadow queue to owner claim to review; recertification; re-review when logs show a new tool or model; MAS AIRG control map and evidence pack from logs and registry | Every partner agent owned or queued; risk lead reviews a sample pack |
+| 5 Package and operate | 9-10 | One-command install (cloud-init, shell installer); retention; backup; upgrade; health page; runbook | Fresh VM to first report in under an hour from the runbook alone |
+| 6 Pilot | 10-12 | Install on the partner's VM; week-1 readout; weekly report in their ops meeting | Success criteria met and paid conversion agreed |
 
 Stopped or deferred:
+- After the pilot: enforcement through connectors (LiteLLM pre-call hook, shadow mode, Cedar export).
 - Stopped: OpenAI- and Anthropic-compatible endpoints (build prompt M1.4). LiteLLM covers this.
 - Deferred until a customer needs it: Postgres, Redis and multi-node scale-out (M4).
 - Deferred to the first paying customer's identity provider: OIDC, SCIM and short-lived credentials (M5).
