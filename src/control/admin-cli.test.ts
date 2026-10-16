@@ -15,10 +15,10 @@ const CLI = new URL("./admin-cli.js", import.meta.url).pathname;
 const KEY = randomBytes(32).toString("base64");
 
 function setup() {
-  const dir = mkdtempSync(join(tmpdir(), "governai-cli-"));
+  const dir = mkdtempSync(join(tmpdir(), "zenai4-cli-"));
   const db = join(dir, "g.db");
   const cli = (...args: string[]) => {
-    const r = spawnSync(process.execPath, [CLI, ...args], { env: { ...process.env, GOVERNAI_DB_PATH: db, GOVERNAI_BACKUP_KEY: KEY }, encoding: "utf8" });
+    const r = spawnSync(process.execPath, [CLI, ...args], { env: { ...process.env, ZENAI4_DB_PATH: db, ZENAI4_BACKUP_KEY: KEY }, encoding: "utf8" });
     return { code: r.status, out: r.stdout.trim(), err: r.stderr };
   };
   return { dir, db, cli };
@@ -126,6 +126,16 @@ test("encrypted backup restores with an intact chain; wrong key or altered file 
   assert.equal(bad.code, 1);
   assert.match(bad.err, /failed authentication/);
 
-  const wrongKey = spawnSync(process.execPath, [CLI, "restore", "--in", bak, "--to", join(dir, "y.db")], { env: { ...process.env, GOVERNAI_BACKUP_KEY: randomBytes(32).toString("base64") }, encoding: "utf8" });
+  const wrongKey = spawnSync(process.execPath, [CLI, "restore", "--in", bak, "--to", join(dir, "y.db")], { env: { ...process.env, ZENAI4_BACKUP_KEY: randomBytes(32).toString("base64") }, encoding: "utf8" });
   assert.equal(wrongKey.status, 1);
+});
+
+test("old GOVERNAI_* variable names still work after the rename to ZenAi4", () => {
+  const dir = mkdtempSync(join(tmpdir(), "zenai4-legacy-"));
+  const db = join(dir, "legacy.db");
+  const env = { ...process.env };
+  for (const k of Object.keys(env)) if (k.startsWith("ZENAI4_")) delete env[k];
+  const r = spawnSync(process.execPath, [CLI, "init", "--admin-email", "ops@acme.test", "--admin-name", "Ops"], { env: { ...env, GOVERNAI_DB_PATH: db }, encoding: "utf8" });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stderr, new RegExp(`Initialised ${db.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
 });

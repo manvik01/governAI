@@ -1,6 +1,11 @@
-# Run governAI locally or on-premises
+# Run ZenAi4 locally or on-premises
 
-governAI ships as one container. All state (agents, credentials, policies, budgets, the
+> Renamed from governAI on 16 October 2026. Inside the container, old `GOVERNAI_*` variables and the
+> `governai-admin` command still work. Compose-file variables do not: rename `GOVERNAI_BACKUP_KEY`,
+> `GOVERNAI_HOSTNAME` and `GOVERNAI_PORT` in your `.env` to `ZENAI4_*`. The data volume is now
+> `zenai4_zenai4-data`, so an existing test install starts empty.
+
+ZenAi4 ships as one container. All state (agents, credentials, policies, budgets, the
 audit chain) lives in a single volume mounted at `/data`. Two setups are provided:
 
 | Setup | File | Who can reach it | TLS |
@@ -23,7 +28,7 @@ Both run one gateway replica. More than one replica needs milestone M4 (Postgres
 ```bash
 git clone https://github.com/manvik01/governAI.git && cd governAI
 cp .env.example .env
-# put a key in .env:  GOVERNAI_BACKUP_KEY=$(openssl rand -base64 32)
+# put a key in .env:  ZENAI4_BACKUP_KEY=$(openssl rand -base64 32)
 docker compose up -d --build
 docker compose ps                     # wait for "healthy"
 ```
@@ -31,15 +36,15 @@ docker compose ps                     # wait for "healthy"
 Create the first administrator. This works once; the token prints once, so store it now:
 
 ```bash
-docker compose exec gateway governai-admin init --admin-email you@company.com --admin-name "Your Name"
+docker compose exec gateway zenai4-admin init --admin-email you@company.com --admin-name "Your Name"
 ```
 
 Add people and give them tokens:
 
 ```bash
-docker compose exec gateway governai-admin user add --email ana@company.com --name "Ana" --roles security_reviewer
-docker compose exec gateway governai-admin user add --email raj@company.com --name "Raj" --roles agent_owner
-docker compose exec gateway governai-admin token issue --email raj@company.com
+docker compose exec gateway zenai4-admin user add --email ana@company.com --name "Ana" --roles security_reviewer
+docker compose exec gateway zenai4-admin user add --email raj@company.com --name "Raj" --roles agent_owner
+docker compose exec gateway zenai4-admin token issue --email raj@company.com
 ```
 
 Roles: `admin`, `security_reviewer`, `budget_admin`, `auditor`, `agent_owner`.
@@ -60,12 +65,12 @@ calls `POST /v1/call` with the credential it was issued. See `README.md` for the
 ```bash
 cd deploy/onprem
 cp ../../.env.example .env
-# set GOVERNAI_BACKUP_KEY and GOVERNAI_HOSTNAME (the DNS name clients will use)
+# set ZENAI4_BACKUP_KEY and ZENAI4_HOSTNAME (the DNS name clients will use)
 docker compose up -d --build
-docker compose exec gateway governai-admin init --admin-email you@company.com --admin-name "Your Name"
+docker compose exec gateway zenai4-admin init --admin-email you@company.com --admin-name "Your Name"
 ```
 
-- Point `GOVERNAI_HOSTNAME` at this server in your internal DNS.
+- Point `ZENAI4_HOSTNAME` at this server in your internal DNS.
 - **Certificates.** The Caddyfile uses `tls internal` (Caddy's own CA), which is fine for a
   pilot if clients trust that CA. For production, put your certificate and key in
   `deploy/onprem/certs/` and change the `tls` line to `tls /certs/cert.pem /certs/key.pem`.
@@ -76,22 +81,22 @@ docker compose exec gateway governai-admin init --admin-email you@company.com --
 
 | Task | Command (prefix with `docker compose exec gateway`) |
 |---|---|
-| Verify the audit chain | `governai-admin audit verify` (exit 1 and the broken position if tampered) |
-| Export audit log | `governai-admin audit export --out /backups/audit.jsonl` |
-| Encrypted backup | `governai-admin backup --out /backups/governai-2026-10-16.bak` |
-| Copy a backup off the host | `docker compose cp gateway:/backups/governai-2026-10-16.bak .` |
-| Restore | `governai-admin restore --in /backups/<file>.bak --to /data/restored.db`, then set `GOVERNAI_DB_PATH=/data/restored.db` and restart |
-| Remove a person | `governai-admin user deactivate --email <e>` (revokes their tokens at once) |
+| Verify the audit chain | `zenai4-admin audit verify` (exit 1 and the broken position if tampered) |
+| Export audit log | `zenai4-admin audit export --out /backups/audit.jsonl` |
+| Encrypted backup | `zenai4-admin backup --out /backups/zenai4-2026-10-16.bak` |
+| Copy a backup off the host | `docker compose cp gateway:/backups/zenai4-2026-10-16.bak .` |
+| Restore | `zenai4-admin restore --in /backups/<file>.bak --to /data/restored.db`, then set `ZENAI4_DB_PATH=/data/restored.db` and restart |
+| Remove a person | `zenai4-admin user deactivate --email <e>` (revokes their tokens at once) |
 | Logs | `docker compose logs -f gateway` |
 | SIEM feed | every audit event is appended to `/data/audit-siem.jsonl`; ship it with your log agent |
 | Upgrade | `git pull && docker compose up -d --build` (the volume is kept) |
 
 Schedule `backup` and `audit verify` daily (cron on the host or your scheduler). Keep
-`GOVERNAI_BACKUP_KEY` in your secret store: a backup cannot be restored without it.
+`ZENAI4_BACKUP_KEY` in your secret store: a backup cannot be restored without it.
 
 ## Security notes
 
-- Anyone who can run `docker compose exec` on the host can run `governai-admin`, which is
+- Anyone who can run `docker compose exec` on the host can run `zenai4-admin`, which is
   administrator access. Restrict shell and Docker access on this server accordingly.
 - The container runs as a non-root user with a read-only filesystem, no Linux capabilities and
   `no-new-privileges`; only `/data`, `/backups` and `/tmp` are writable.

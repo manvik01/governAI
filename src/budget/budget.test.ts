@@ -24,7 +24,7 @@ import { GovernedModelGateway, ProviderError, type ModelRequest, type ProviderFn
 // ------------------------------------------------------------------ fixtures
 
 function mkWorld() {
-  const dir = mkdtempSync(join(tmpdir(), "governai-budget-"));
+  const dir = mkdtempSync(join(tmpdir(), "zenai4-budget-"));
   const registry = new AgentRegistry();
   const ledger = new Ledger(join(dir, "ledger.db"));
   const engine = new PolicyEngine(registry, ledger);

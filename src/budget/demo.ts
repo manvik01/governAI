@@ -23,7 +23,7 @@ const usd = (micro: number) => `$${(micro / 1_000_000).toFixed(6)}`;
 const section = (t: string) => console.log(`\n${"=".repeat(74)}\n${t}\n${"=".repeat(74)}`);
 
 async function main() {
-  const dir = mkdtempSync(join(tmpdir(), "governai-budget-demo-"));
+  const dir = mkdtempSync(join(tmpdir(), "zenai4-budget-demo-"));
   const registry = new AgentRegistry();
   const ledger = new Ledger(join(dir, "ledger.db"));
   const engine = new PolicyEngine(registry, ledger);

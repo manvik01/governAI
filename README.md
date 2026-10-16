@@ -1,4 +1,4 @@
-# governAI
+# ZenAi4
 
 ## Agent Governance Control Plane — Proof of Concept
 
@@ -19,9 +19,9 @@ of the product spec doc for what comes next and in what order.
 ## Run it in a container (local or on-premises)
 
 ```bash
-cp .env.example .env        # set GOVERNAI_BACKUP_KEY=$(openssl rand -base64 32)
+cp .env.example .env        # set ZENAI4_BACKUP_KEY=$(openssl rand -base64 32)
 docker compose up -d --build
-docker compose exec gateway governai-admin init --admin-email you@company.com --admin-name "Your Name"
+docker compose exec gateway zenai4-admin init --admin-email you@company.com --admin-name "Your Name"
 ```
 
 The gateway listens on `127.0.0.1:8787`. For a server other machines reach over TLS, use
@@ -90,8 +90,8 @@ holds across processes, not just across function calls.
 server is running:**
 
 ```bash
-GOVERNAI_DB_PATH=./mcp-ledger.db npm run mcp:approve -- list
-GOVERNAI_DB_PATH=./mcp-ledger.db npm run mcp:approve -- decide <approvalId> approve
+ZENAI4_DB_PATH=./mcp-ledger.db npm run mcp:approve -- list
+ZENAI4_DB_PATH=./mcp-ledger.db npm run mcp:approve -- decide <approvalId> approve
 ```
 
 **3. Run a real Claude agent against it:**
@@ -184,7 +184,7 @@ PRD, with the decisions taken on each gap in the original, is in
 
 ```bash
 npm test                       # 39 tests across budget, control plane, admin CLI and MCP admin
-GOVERNAI_DB_PATH=./governai.db npm run server   # authenticated gateway on :8787
+ZENAI4_DB_PATH=./zenai4.db npm run server   # authenticated gateway on :8787
 docker compose up -d --build                    # container; see docs/deployment/local-and-onprem.md
 ```
 

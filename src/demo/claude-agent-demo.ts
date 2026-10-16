@@ -43,14 +43,14 @@ async function main() {
       // same server process the protocol-level test client in
       // src/mcp/test-client.ts talks to.
       mcpServers: {
-        governai: {
+        zenai4: {
           command: "node",
           args: ["dist/mcp/server.js"],
-          env: { GOVERNAI_DB_PATH: DB_PATH },
+          env: { ZENAI4_DB_PATH: DB_PATH },
         },
       },
       // Server-qualified tool names follow mcp__<serverName>__<toolName>.
-      allowedTools: ["mcp__governai__issue_refund", "mcp__governai__check_approval"],
+      allowedTools: ["mcp__zenai4__issue_refund", "mcp__zenai4__check_approval"],
       maxTurns: 5,
     },
   });

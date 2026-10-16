@@ -1,4 +1,4 @@
-# governAI - Product Requirements Document (refined)
+# ZenAi4 - Product Requirements Document (refined)
 
 Version 1.0 - the governance control plane for AI agents across providers and platforms.
 
@@ -157,7 +157,7 @@ A starting map for design and customer conversations. Confirm each control refer
 ## 7. Deployment architecture
 
 ```
-agents / MCP clients ──► [ load balancer / ingress ] ──► N x governAI gateway (stateless container)
+agents / MCP clients ──► [ load balancer / ingress ] ──► N x ZenAi4 gateway (stateless container)
 humans (console, API) ──►                                   │   authN, authZ, rate limit, policy, budget, audit
                                                             ▼
                                   Postgres: registry, credentials, directory cache, audit log,
@@ -202,16 +202,16 @@ keys; TLS terminated at the ingress with mTLS to agents where required.
 
 ## 10. Milestones (revised 16 October 2026)
 
-**Product objective:** a customer runs governAI on one lightweight VM that captures its AI agents'
+**Product objective:** a customer runs ZenAi4 on one lightweight VM that captures its AI agents'
 logs and deciphers them into operational reports (activity, reliability, cost, governance, weekly
 operations report). Discovery, ownership and MAS-mapped evidence are built from the same logs.
 Enforcement comes after the pilot. Market context: Microsoft Agent 365 and AWS AgentCore Policy
 are generally available, LiteLLM already enforces budgets, and self-hosted LLM observability tools
-(Langfuse, Phoenix, Helicone) target developers and need ClickHouse, Postgres and Redis. governAI
+(Langfuse, Phoenix, Helicone) target developers and need ClickHouse, Postgres and Redis. ZenAi4
 targets operations and risk owners on one small VM. Full plan with exit tests: the MVP spec doc.
 
 Architecture on the VM: OpenTelemetry Collector (OTLP, file, syslog receivers; redaction; buffer)
--> governAI intake (token per source, disk queue, batch counted in the audit chain) -> decipher
+-> ZenAi4 intake (token per source, disk queue, batch counted in the audit chain) -> decipher
 (canonical event schema, mapping for each OpenTelemetry GenAI convention generation, agent
 identification, run reconstruction, error classes, cost) -> daily Parquet files queried with
 DuckDB, plus SQLite for registry, owners and audit chain -> reports, console, PDF/email/Slack,

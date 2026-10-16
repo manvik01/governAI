@@ -1,5 +1,5 @@
 {
-  "name": "agent-governance-poc",
+  "name": "zenai4",
   "version": "0.1.0",
   "description": "Proof-of-concept: governance control plane for AI agents (registry, policy engine, gateway, evidence ledger)",
   "type": "module",
@@ -34,6 +34,7 @@
     "typescript": "^5.6.2"
   },
   "bin": {
+    "zenai4-admin": "dist/control/admin-cli.js",
     "governai-admin": "dist/control/admin-cli.js"
   }
 }

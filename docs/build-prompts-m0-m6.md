@@ -1,4 +1,4 @@
-# governAI - build prompts for milestones M0 to M6
+# ZenAi4 - build prompts for milestones M0 to M6
 
 > **Revised 16 October 2026:** the build order changed (see `docs/PRD.md` section 10). Still
 > valid: Prompt 0, M0, M1.1, M1.2, M1.5, M1.6, M2.1 (shadow mode), M2.4 (Slack), the M1 review
@@ -24,7 +24,7 @@ first slice) and follow the milestones in section 10 of `docs/PRD.md`.
 ```
 Create AGENTS.md at the repo root with exactly these rules, then commit it.
 
-# governAI project rules
+# ZenAi4 project rules
 
 Product: a control plane for AI agents. Every agent is registered, owned, reviewed and given its
 own credential. Every call goes through one authenticated gateway that applies policy, reserves
@@ -84,10 +84,10 @@ route was added.
 Task:
 1. Add .github/workflows/ci.yml: on push and pull request, Node 20, `npm ci`, `npm test`.
    Cache npm. Fail on any warning from `npm audit --audit-level=high --omit=dev`.
-2. Build the Dockerfile for real: `docker build -t governai-gateway .`. Fix whatever breaks
+2. Build the Dockerfile for real: `docker build -t zenai4-gateway .`. Fix whatever breaks
    (native module better-sqlite3 build, missing files, permissions on /data).
-3. Run it: `docker run -d -p 8787:8787 -v governai-data:/data -e GOVERNAI_DB_PATH=/data/governai.db
-   governai-gateway`. Prove: GET /healthz and /readyz return 200 without credentials; any other
+3. Run it: `docker run -d -p 8787:8787 -v zenai4-data:/data -e ZENAI4_DB_PATH=/data/zenai4.db
+   zenai4-gateway`. Prove: GET /healthz and /readyz return 200 without credentials; any other
    route returns 401; `docker stop` exits within 10 seconds and logs a graceful shutdown; the
    process runs as a non-root user (`docker exec ... id`).
 4. Scan the image with trivy or grype if available; list high/critical findings, do not fix
@@ -103,10 +103,10 @@ Done when: CI file exists, image builds, the four proofs above are pasted as com
 
 ```
 Problem: a freshly deployed container has no users, no access profiles and no tokens, so nobody
-can call any route. Build src/control/admin-cli.ts, exposed as `governai-admin` (bin in
+can call any route. Build src/control/admin-cli.ts, exposed as `zenai4-admin` (bin in
 package.json) and `npm run admin -- <command>`.
 
-Commands (all read GOVERNAI_DB_PATH):
+Commands (all read ZENAI4_DB_PATH):
   init --admin-email <e> --admin-name <n>
       Create the schema, the default access profiles, and the first admin user. REFUSE if any
       admin already exists. Print one admin token ONCE to stdout, nothing else secret.
@@ -125,7 +125,7 @@ Rules:
 
 Tests: init twice (second refused), init then issue token then call GET /v1/agents through the
 secure gateway, deactivated user's token stops working, audit verify detects a tampered row.
-Done when: from an empty volume, `docker run ... governai-admin init ...` followed by a curl with
+Done when: from an empty volume, `docker run ... zenai4-admin init ...` followed by a curl with
 the printed token succeeds, and the init is visible in the user stream.
 ```
 
@@ -143,7 +143,7 @@ Build src/providers/:
 - mock.ts: deterministic provider for tests, with a call counter and the ability to fail, time
   out, or omit usage.
 - registry.ts: loads providers from env. Keys come from env var NAMES configured in
-  GOVERNAI_PROVIDERS (JSON: [{"name":"anthropic","type":"anthropic","keyEnv":"ANTHROPIC_API_KEY",
+  ZENAI4_PROVIDERS (JSON: [{"name":"anthropic","type":"anthropic","keyEnv":"ANTHROPIC_API_KEY",
   "baseUrl":"..."}]). The key value is read from process.env at call time. Never stored in the
   database, never logged, never in an error message, never returned by any route.
 
@@ -192,18 +192,18 @@ over-allocation acceptance tests pass over HTTP, not just in-process.
 ### M1.4 Drop-in compatibility endpoint (integration surface)
 
 ```
-Goal: let an existing agent adopt governAI by changing only its base URL and API key.
+Goal: let an existing agent adopt ZenAi4 by changing only its base URL and API key.
 
 Add POST /v1/chat/completions (OpenAI-compatible request and response shape, non-streaming) and
 POST /v1/messages (Anthropic-compatible shape, non-streaming). The "API key" the client sends is
-the agent's governAI credential in the Authorization or x-api-key header.
+the agent's ZenAi4 credential in the Authorization or x-api-key header.
 - Map the compatible request onto the same code path as /v1/models/invoke. No second
   implementation of the control order.
-- Extra governance fields travel in headers: X-Governai-Task, X-Governai-Parent-Task,
-  X-Governai-Project, X-Governai-Request-Id. If task or project is missing, use the agent's
+- Extra governance fields travel in headers: X-ZenAi4-Task, X-ZenAi4-Parent-Task,
+  X-ZenAi4-Project, X-ZenAi4-Request-Id. If task or project is missing, use the agent's
   default project and open a root task automatically, and record that in the audit event.
 - Errors use the compatible error envelope so SDKs raise normal exceptions. Map 402 and 403 to
-  the closest status the SDKs understand and put the governAI reason code in the message.
+  the closest status the SDKs understand and put the ZenAi4 reason code in the message.
 - Streaming requests (stream:true) return 400 "streaming not supported yet" - do not silently
   buffer.
 
@@ -217,7 +217,7 @@ Done when: both SDK examples run against a local gateway and the calls appear in
 
 ```
 Extend src/mcp/server.ts so a stdio MCP server forwards each governed tool call to the secure
-gateway over HTTP using GOVERNAI_GATEWAY_URL and GOVERNAI_AGENT_TOKEN (env only). The MCP
+gateway over HTTP using ZENAI4_GATEWAY_URL and ZENAI4_AGENT_TOKEN (env only). The MCP
 server holds no policy logic and no database access of its own. If the gateway is unreachable
 the tool call FAILS CLOSED with a clear error; it never falls back to calling the tool directly.
 Tests: protocol-level test client; denied, held and allowed paths; gateway down -> fail closed.
@@ -228,8 +228,8 @@ Done when: the MCP test client passes against a real running secure gateway.
 ### M1.6 Backup, restore and the egress guide
 
 ```
-1. `governai-admin backup --out <file>`: use better-sqlite3 `db.backup()` (online, consistent),
-   then encrypt with AES-256-GCM using a key from env GOVERNAI_BACKUP_KEY (32 bytes, base64).
+1. `zenai4-admin backup --out <file>`: use better-sqlite3 `db.backup()` (online, consistent),
+   then encrypt with AES-256-GCM using a key from env ZENAI4_BACKUP_KEY (32 bytes, base64).
    `restore --in <file> --to <path>` decrypts, then runs verifyChain and refuses to finish if the
    chain is broken. Test: backup while writes are happening, restore, chain intact, row counts
    match a snapshot taken at backup start.
@@ -238,7 +238,7 @@ Done when: the MCP test client passes against a real running secure gateway.
    only in the gateway's secret store. Include sample rules for Docker network policy, a
    Kubernetes NetworkPolicy and a cloud security group, all with placeholders. State plainly that
    without (a) and (b) governance is advisory.
-3. Add a startup warning when GOVERNAI_PROVIDERS is empty or when running without TLS in front.
+3. Add a startup warning when ZENAI4_PROVIDERS is empty or when running without TLS in front.
 Done when: restore test passes and the egress doc reads as a checklist a platform engineer can
 follow.
 ```
@@ -326,7 +326,7 @@ Implement SlackApprovalChannel behind the existing ApprovalChannel interface.
 - On a held action, post a message to [CHANNEL] with approve/reject buttons and an expiry.
 - Receive interactions at POST /v1/integrations/slack/interact. VERIFY the Slack signing secret
   and reject timestamps older than 5 minutes (replay). Constant-time compare.
-- Map the Slack user to a governAI user by verified email; reject unmapped users and users
+- Map the Slack user to a ZenAi4 user by verified email; reject unmapped users and users
   without the required role.
 - Separation of duties is enforced server-side: the requester, owner and sub-owner cannot
   approve, even if Slack lets them click.
@@ -348,7 +348,7 @@ Done when: all negative cases are refused and logged.
 1. Add GET /v1/billing/summary?month= and GET /v1/billing/export?month= (CSV: provider cost,
    governance cost, platform fee, separately, per agent and project; each line carries the usage
    event id and pricing version). Test that every line traces to usage evidence.
-2. Make the pricing book configurable by file (GOVERNAI_PRICING_FILE), versioned, with the
+2. Make the pricing book configurable by file (ZENAI4_PRICING_FILE), versioned, with the
    active version recorded on every ledger row. Changing prices creates a new version; it never
    rewrites history.
 3. Write scripts/weekly-findings.ts: prints, for the last 7 days, agents registered, calls
@@ -424,7 +424,7 @@ rotation), nonce. Roles come from the directory (SCIM-synced), not from token cl
 Implement SCIM 2.0 /Users and /Groups (bearer-protected, separate credential): create, update,
 deactivate. Deactivation must revoke that user's sessions and block them as owner immediately.
 Tests with a local mock IdP: expired token, wrong audience, key rotation, deactivated user,
-group-to-role mapping. Keep the old tokens only behind an explicit GOVERNAI_ALLOW_LOCAL_TOKENS
+group-to-role mapping. Keep the old tokens only behind an explicit ZENAI4_ALLOW_LOCAL_TOKENS
 flag, off by default, logged at startup.
 ```
 

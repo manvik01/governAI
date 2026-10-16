@@ -1,34 +1,34 @@
-# governAI - on-premises: gateway behind a TLS reverse proxy (Caddy).
+# ZenAi4 - on-premises: gateway behind a TLS reverse proxy (Caddy).
 #
 #   cd deploy/onprem
-#   cp ../../.env.example .env      # set GOVERNAI_BACKUP_KEY and GOVERNAI_HOSTNAME
+#   cp ../../.env.example .env      # set ZENAI4_BACKUP_KEY and ZENAI4_HOSTNAME
 #   docker compose up -d --build
-#   docker compose exec gateway governai-admin init --admin-email you@company.com --admin-name "Your Name"
+#   docker compose exec gateway zenai4-admin init --admin-email you@company.com --admin-name "Your Name"
 #
 # Only the proxy publishes ports. The gateway is reachable only on the internal
 # network, which is why TRUST_PROXY=1 is safe here: every request has passed
 # Caddy, which discards client-supplied X-Forwarded-For headers and sets its own.
 
-name: governai
+name: zenai4
 
 services:
   gateway:
     build: ../..
-    image: governai:local
+    image: zenai4:local
     restart: unless-stopped
     env_file:
       - path: .env
         required: false
     environment:
-      GOVERNAI_DB_PATH: /data/governai.db
-      GOVERNAI_SIEM_PATH: /data/audit-siem.jsonl
+      ZENAI4_DB_PATH: /data/zenai4.db
+      ZENAI4_SIEM_PATH: /data/audit-siem.jsonl
       PORT: "8787"
       TRUST_PROXY: "1"
     expose: ["8787"]
     networks: [internal]
     volumes:
-      - governai-data:/data
-      - governai-backups:/backups
+      - zenai4-data:/data
+      - zenai4-backups:/backups
     read_only: true
     tmpfs:
       - /tmp
@@ -43,7 +43,7 @@ services:
       gateway:
         condition: service_healthy
     environment:
-      GOVERNAI_HOSTNAME: ${GOVERNAI_HOSTNAME:?set GOVERNAI_HOSTNAME in .env}
+      ZENAI4_HOSTNAME: ${ZENAI4_HOSTNAME:?set ZENAI4_HOSTNAME in .env}
     ports:
       - "443:443"
       - "80:80"
@@ -63,7 +63,7 @@ networks:
   edge: {}
 
 volumes:
-  governai-data:
-  governai-backups:
+  zenai4-data:
+  zenai4-backups:
   caddy-data:
   caddy-config:

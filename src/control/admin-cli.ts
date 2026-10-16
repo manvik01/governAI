@@ -1,23 +1,24 @@
 #!/usr/bin/env node
-// governai-admin: operator CLI for a governAI deployment.
+// zenai4-admin: operator CLI for a ZenAi4 deployment.
 //
 // It talks to the database directly, so whoever can run it (shell access to the
 // container or host) is effectively an administrator - protect that access like
 // root. Every action it takes is written to the USER audit stream as
 // "cli:<os user>", and secrets it creates are printed once and never stored.
 //
-//   governai-admin init --admin-email ops@acme.com --admin-name "Ops Admin"
-//   governai-admin user add --email ana@acme.com --name "Ana" --roles security_reviewer
-//   governai-admin user deactivate --email ana@acme.com
-//   governai-admin user list
-//   governai-admin token issue --email ana@acme.com [--ttl-hours 8]
-//   governai-admin profile list | profile add --file profile.json
-//   governai-admin audit verify | audit export [--out file.jsonl]
-//   governai-admin backup --out /backups/governai.bak      (needs GOVERNAI_BACKUP_KEY)
-//   governai-admin restore --in /backups/governai.bak --to /data/restored.db
+//   zenai4-admin init --admin-email ops@acme.com --admin-name "Ops Admin"
+//   zenai4-admin user add --email ana@acme.com --name "Ana" --roles security_reviewer
+//   zenai4-admin user deactivate --email ana@acme.com
+//   zenai4-admin user list
+//   zenai4-admin token issue --email ana@acme.com [--ttl-hours 8]
+//   zenai4-admin profile list | profile add --file profile.json
+//   zenai4-admin audit verify | audit export [--out file.jsonl]
+//   zenai4-admin backup --out /backups/zenai4.bak      (needs ZENAI4_BACKUP_KEY)
+//   zenai4-admin restore --in /backups/zenai4.bak --to /data/restored.db
 //
-// Reads GOVERNAI_DB_PATH (default ./governai.db). Exit codes: 0 ok, 1 failure, 2 usage.
+// Reads ZENAI4_DB_PATH (default ./zenai4.db). Exit codes: 0 ok, 1 failure, 2 usage.
 
+import "../config/env-compat.js";
 import { parseArgs } from "node:util";
 import { userInfo } from "node:os";
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdtempSync } from "node:fs";
@@ -32,7 +33,7 @@ const ROLES: Role[] = ["admin", "security_reviewer", "budget_admin", "auditor", 
 const AUTONOMY = ["A0", "A1", "A2", "A3", "A4"];
 const MAGIC = Buffer.from("GAIBAK1\n");
 
-const HELP = `governai-admin - operator CLI (reads GOVERNAI_DB_PATH)
+const HELP = `zenai4-admin - operator CLI (reads ZENAI4_DB_PATH)
 
   init --admin-email <e> --admin-name <n> [--ttl-hours 8]   first admin + default profiles (once only)
   user add --email <e> --name <n> --roles <r1,r2>           roles: ${ROLES.join(", ")}
@@ -43,7 +44,7 @@ const HELP = `governai-admin - operator CLI (reads GOVERNAI_DB_PATH)
   profile add --file <profile.json>
   audit verify                                               exit 1 if the chain is broken
   audit export [--out <file.jsonl>]
-  backup --out <file>                                        encrypted; needs GOVERNAI_BACKUP_KEY
+  backup --out <file>                                        encrypted; needs ZENAI4_BACKUP_KEY
   restore --in <file> --to <new.db>                          decrypts, then verifies integrity
 
 Exit codes: 0 ok, 1 failure, 2 usage error.
@@ -83,10 +84,10 @@ function validProfile(p: any): p is AccessProfile {
 }
 
 function backupKey(): Buffer {
-  const raw = process.env.GOVERNAI_BACKUP_KEY;
-  if (!raw) throw new CliError("GOVERNAI_BACKUP_KEY is not set (32 random bytes, base64). Generate one with: openssl rand -base64 32");
+  const raw = process.env.ZENAI4_BACKUP_KEY;
+  if (!raw) throw new CliError("ZENAI4_BACKUP_KEY is not set (32 random bytes, base64). Generate one with: openssl rand -base64 32");
   const key = Buffer.from(raw, "base64");
-  if (key.length !== 32) throw new CliError("GOVERNAI_BACKUP_KEY must decode to exactly 32 bytes");
+  if (key.length !== 32) throw new CliError("ZENAI4_BACKUP_KEY must decode to exactly 32 bytes");
   return key;
 }
 
@@ -109,8 +110,8 @@ async function run(argv: string[]): Promise<number> {
 
   if (group === "restore") return restore(need(values.in, "in"), need(values.to, "to"));
 
-  const dbPath = process.env.GOVERNAI_DB_PATH ?? "./governai.db";
-  const cp = buildControlPlane({ dbPath, siemPath: process.env.GOVERNAI_SIEM_PATH });
+  const dbPath = process.env.ZENAI4_DB_PATH ?? "./zenai4.db";
+  const cp = buildControlPlane({ dbPath, siemPath: process.env.ZENAI4_SIEM_PATH });
   try {
     switch (`${group}${["init", "backup"].includes(group) ? "" : " " + (sub ?? "")}`) {
       case "init": {
@@ -196,7 +197,7 @@ async function run(argv: string[]): Promise<number> {
         const out = need(values.out, "out");
         const key = backupKey();
         if (existsSync(out)) throw new CliError(`${out} already exists; refusing to overwrite`);
-        const tmp = join(mkdtempSync(join(tmpdir(), "governai-bak-")), "snap.db");
+        const tmp = join(mkdtempSync(join(tmpdir(), "zenai4-bak-")), "snap.db");
         await cp.db.backup(tmp); // online, consistent snapshot
         const plain = readFileSync(tmp);
         unlinkSync(tmp);
@@ -225,9 +226,9 @@ function ttlMinutes(h: string | undefined): number {
 
 function restore(input: string, to: string): number {
   const key = backupKey();
-  if (existsSync(to)) throw new CliError(`${to} already exists; restore into a new path, then point GOVERNAI_DB_PATH at it`);
+  if (existsSync(to)) throw new CliError(`${to} already exists; restore into a new path, then point ZENAI4_DB_PATH at it`);
   const buf = readFileSync(input);
-  if (!buf.subarray(0, MAGIC.length).equals(MAGIC)) throw new CliError("not a governAI backup file");
+  if (!buf.subarray(0, MAGIC.length).equals(MAGIC)) throw new CliError("not a ZenAi4 backup file");
   const iv = buf.subarray(MAGIC.length, MAGIC.length + 12);
   const tag = buf.subarray(MAGIC.length + 12, MAGIC.length + 28);
   const d = createDecipheriv("aes-256-gcm", key, iv);
@@ -253,14 +254,14 @@ function restore(input: string, to: string): number {
   }
 }
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("governai-admin")) {
+if (import.meta.url === `file://${process.argv[1]}` || /(zenai4|governai)-admin$/.test(process.argv[1] ?? "")) {
   run(process.argv.slice(2)).then(
     (code) => process.exit(code),
     (err) => {
-      if (err instanceof UsageError || (err as any)?.code?.startsWith?.("ERR_PARSE_ARGS")) { process.stderr.write(`usage error: ${err.message}\nRun \`governai-admin help\`.\n`); process.exit(2); }
+      if (err instanceof UsageError || (err as any)?.code?.startsWith?.("ERR_PARSE_ARGS")) { process.stderr.write(`usage error: ${err.message}\nRun \`zenai4-admin help\`.\n`); process.exit(2); }
       if (err instanceof CliError) { process.stderr.write(`error: ${err.message}\n`); process.exit(1); }
       process.stderr.write(`error: ${(err as Error)?.message ?? "unexpected failure"}\n`);
-      if (process.env.GOVERNAI_DEBUG === "1") console.error(err);
+      if (process.env.ZENAI4_DEBUG === "1") console.error(err);
       process.exit(1);
     },
   );

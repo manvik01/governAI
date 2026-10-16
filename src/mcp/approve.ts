@@ -11,10 +11,11 @@
 //   npm run mcp:approve -- decide <approvalId> approve [approver] [reason]
 //   npm run mcp:approve -- decide <approvalId> reject  [approver] [reason]
 
+import "../config/env-compat.js";
 import { Ledger } from "../ledger/ledger.js";
 import type { ActionRequest } from "../types.js";
 
-const DB_PATH = process.env.GOVERNAI_DB_PATH ?? "./mcp-ledger.db";
+const DB_PATH = process.env.ZENAI4_DB_PATH ?? "./mcp-ledger.db";
 
 function usage(): never {
   console.error("Usage:");

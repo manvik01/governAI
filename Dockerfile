@@ -1,8 +1,8 @@
-# governAI gateway - one stateless container; all state lives in the /data volume.
+# ZenAi4 gateway - one stateless container; all state lives in the /data volume.
 #
-#   docker build -t governai:local .
+#   docker build -t zenai4:local .
 #   docker compose up -d                         (see compose.yaml and docs/deployment)
-#   docker compose exec gateway governai-admin init --admin-email you@company.com --admin-name "You"
+#   docker compose exec gateway zenai4-admin init --admin-email you@company.com --admin-name "You"
 #
 # Single node only while the stores are on SQLite. More than one replica needs the
 # Postgres + Redis work in milestone M4 (docs/PRD.md section 10).
@@ -24,17 +24,18 @@ RUN npm run build \
 
 # ---- runtime: no compiler, no dev dependencies, non-root
 FROM ${NODE_RUNTIME_IMAGE}
-LABEL org.opencontainers.image.title="governAI gateway" \
+LABEL org.opencontainers.image.title="ZenAi4 gateway" \
       org.opencontainers.image.description="Governance control plane for AI agents" \
       org.opencontainers.image.source="https://github.com/manvik01/governAI"
 ENV NODE_ENV=production \
     PORT=8787 \
-    GOVERNAI_DB_PATH=/data/governai.db
+    ZENAI4_DB_PATH=/data/zenai4.db
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 RUN mkdir -p /usr/local/bin \
+ && ln -s /app/dist/control/admin-cli.js /usr/local/bin/zenai4-admin \
  && ln -s /app/dist/control/admin-cli.js /usr/local/bin/governai-admin \
  && mkdir -p /data /backups \
  && chown -R node:node /data /backups

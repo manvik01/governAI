@@ -25,6 +25,7 @@
 //     (post-auth), and an audit event for every request outcome, including
 //     failures and denials.
 
+import "../config/env-compat.js";
 import express, { type NextFunction, type Request, type Response } from "express";
 import { nanoid } from "nanoid";
 import { hasRole, type DirectoryUser, type Role } from "../control/identity.js";
@@ -307,17 +308,17 @@ export function createSecureGateway(cp: ControlPlane, options: SecureGatewayOpti
 }
 
 // ---- process entry point: configuration from the environment ------------
-// GOVERNAI_DB_PATH, GOVERNAI_SIEM_PATH, PORT, TRUST_PROXY=1, RATE_LIMIT_PER_MIN
+// ZENAI4_DB_PATH, ZENAI4_SIEM_PATH, PORT, TRUST_PROXY=1, RATE_LIMIT_PER_MIN
 // Users and profiles are provisioned out of band (directory sync / admin tooling).
 if (import.meta.url === `file://${process.argv[1]}`) {
   const { buildControlPlane } = await import("../control/control-plane.js");
-  const cp = buildControlPlane({ dbPath: process.env.GOVERNAI_DB_PATH ?? "./governai.db", siemPath: process.env.GOVERNAI_SIEM_PATH });
+  const cp = buildControlPlane({ dbPath: process.env.ZENAI4_DB_PATH ?? "./zenai4.db", siemPath: process.env.ZENAI4_SIEM_PATH });
   const app = createSecureGateway(cp, {
     trustProxy: process.env.TRUST_PROXY === "1",
     rateLimitPerMin: process.env.RATE_LIMIT_PER_MIN ? Number(process.env.RATE_LIMIT_PER_MIN) : undefined,
   });
   const port = Number(process.env.PORT ?? 8787);
-  const server = app.listen(port, () => console.error(`governAI secure gateway listening on :${port}`));
+  const server = app.listen(port, () => console.error(`ZenAi4 secure gateway listening on :${port}`));
   // Graceful shutdown so an autoscaler can drain replicas without dropping in-flight calls.
   for (const sig of ["SIGTERM", "SIGINT"] as const) {
     process.on(sig, () => server.close(() => { cp.close(); process.exit(0); }));

@@ -11,8 +11,8 @@ export class GatewayError extends Error {
 
 export class GatewayClient {
   constructor(private baseUrl: string, private token: string, private timeoutMs = 10_000) {
-    if (!baseUrl) throw new GatewayError("GOVERNAI_GATEWAY_URL is not set");
-    if (!token) throw new GatewayError("GOVERNAI_USER_TOKEN is not set");
+    if (!baseUrl) throw new GatewayError("ZENAI4_GATEWAY_URL is not set");
+    if (!token) throw new GatewayError("ZENAI4_USER_TOKEN is not set");
   }
 
   async request(method: string, path: string, body?: unknown): Promise<unknown> {
@@ -26,7 +26,7 @@ export class GatewayClient {
       });
     } catch {
       // Never fall back to a direct database or tool call.
-      throw new GatewayError("governAI gateway unreachable - refusing to act");
+      throw new GatewayError("ZenAi4 gateway unreachable - refusing to act");
     }
     const text = await res.text();
     let json: unknown;

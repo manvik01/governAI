@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // MCP admin server: lets an MCP client (Claude Desktop, Cursor, ...) administer
-// governAI by calling the SECURE gateway as an authenticated human.
+// ZenAi4 by calling the SECURE gateway as an authenticated human.
 //
 // Replaces the earlier unauthenticated admin MCP server. It has no database
 // access and no policy logic; the gateway decides who may do what and logs it.
-// Config (env only): GOVERNAI_GATEWAY_URL, GOVERNAI_USER_TOKEN.
+// Config (env only): ZENAI4_GATEWAY_URL, ZENAI4_USER_TOKEN.
 // Run: npm run mcp:admin
 
+import "../config/env-compat.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
@@ -14,7 +15,7 @@ import { GatewayClient, GatewayError } from "./gateway-client.js";
 import { policySchema } from "../policy/schema.js";
 
 export function buildAdminServer(client: GatewayClient) {
-  const server = new McpServer({ name: "governai-admin", version: "0.2.0" });
+  const server = new McpServer({ name: "zenai4-admin", version: "0.2.0" });
 
   const run = async (fn: () => Promise<unknown>) => {
     try {
@@ -75,7 +76,7 @@ export function buildAdminServer(client: GatewayClient) {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const client = new GatewayClient(process.env.GOVERNAI_GATEWAY_URL ?? "", process.env.GOVERNAI_USER_TOKEN ?? "");
+  const client = new GatewayClient(process.env.ZENAI4_GATEWAY_URL ?? "", process.env.ZENAI4_USER_TOKEN ?? "");
   await buildAdminServer(client).connect(new StdioServerTransport());
-  console.error("governAI admin MCP server on stdio");
+  console.error("ZenAi4 admin MCP server on stdio");
 }

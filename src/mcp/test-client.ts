@@ -28,10 +28,10 @@ async function main() {
   const transport = new StdioClientTransport({
     command: "node",
     args: ["dist/mcp/server.js"],
-    env: { ...process.env, GOVERNAI_DB_PATH: DB_PATH },
+    env: { ...process.env, ZENAI4_DB_PATH: DB_PATH },
   });
 
-  const client = new Client({ name: "governai-test-client", version: "0.1.0" });
+  const client = new Client({ name: "zenai4-test-client", version: "0.1.0" });
   await client.connect(transport);
 
   section("1. Discover the server's tools");
@@ -60,7 +60,7 @@ async function main() {
     // approve script so the sequence completes without a human present.
     const { execSync } = await import("node:child_process");
     execSync(`node dist/mcp/approve.js decide ${approvalId} approve manager@example.com "Verified via test client"`, {
-      env: { ...process.env, GOVERNAI_DB_PATH: DB_PATH },
+      env: { ...process.env, ZENAI4_DB_PATH: DB_PATH },
       stdio: "inherit",
     });
   }

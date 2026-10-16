@@ -16,24 +16,25 @@
 // in ../gateway/approvals.ts. All operator-facing logging here uses
 // console.error for the same reason.
 
+import "../config/env-compat.js";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { z } from "zod";
 import { StderrApprovalChannel } from "../gateway/approvals.js";
 import { buildDemoWorld } from "../demo/setup.js";
 
-const DB_PATH = process.env.GOVERNAI_DB_PATH ?? "./mcp-ledger.db";
+const DB_PATH = process.env.ZENAI4_DB_PATH ?? "./mcp-ledger.db";
 
 async function main() {
   const world = buildDemoWorld(DB_PATH, new StderrApprovalChannel());
 
-  console.error(`[governai-mcp] Agent ${world.agent.name} (${world.agent.id})`);
-  console.error(`[governai-mcp] Risk tier: ${world.agent.riskTier} | Lifecycle: ${world.agent.lifecycleState}`);
-  console.error(`[governai-mcp] Policy ${world.policy.id} v${world.policy.version} active for "issue_refund"`);
-  console.error(`[governai-mcp] Ledger: ${DB_PATH}`);
+  console.error(`[zenai4-mcp] Agent ${world.agent.name} (${world.agent.id})`);
+  console.error(`[zenai4-mcp] Risk tier: ${world.agent.riskTier} | Lifecycle: ${world.agent.lifecycleState}`);
+  console.error(`[zenai4-mcp] Policy ${world.policy.id} v${world.policy.version} active for "issue_refund"`);
+  console.error(`[zenai4-mcp] Ledger: ${DB_PATH}`);
 
   const server = new McpServer({
-    name: "governai-refund-agent",
+    name: "zenai4-refund-agent",
     version: "0.1.0",
   });
 
@@ -124,10 +125,10 @@ async function main() {
 
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("[governai-mcp] Server ready on stdio.");
+  console.error("[zenai4-mcp] Server ready on stdio.");
 }
 
 main().catch((err) => {
-  console.error("[governai-mcp] Fatal error:", err);
+  console.error("[zenai4-mcp] Fatal error:", err);
   process.exit(1);
 });

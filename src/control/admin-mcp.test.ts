@@ -19,7 +19,7 @@ const policy = (version: number, over: object = {}) => ({
 });
 
 async function env() {
-  const dbPath = join(mkdtempSync(join(tmpdir(), "governai-admin-")), "cp.db");
+  const dbPath = join(mkdtempSync(join(tmpdir(), "zenai4-admin-")), "cp.db");
   const cp = buildControlPlane({ dbPath });
   for (const p of DEFAULT_PROFILES) cp.profiles.upsert(p);
   cp.directory.upsert({ email: "dave@example.com", displayName: "dave", active: true, roles: ["admin"] });
@@ -96,6 +96,6 @@ test("MCP admin server acts only through the gateway, with the caller's own role
 
 test("MCP admin client fails closed when the gateway is unreachable and refuses to start without config", async () => {
   await assert.rejects(new GatewayClient("http://127.0.0.1:1", "t", 500).request("GET", "/v1/agents"), (err: any) => err instanceof GatewayError && /unreachable/.test(err.message));
-  assert.throws(() => new GatewayClient("", "t"), /GOVERNAI_GATEWAY_URL/);
-  assert.throws(() => new GatewayClient("http://x", ""), /GOVERNAI_USER_TOKEN/);
+  assert.throws(() => new GatewayClient("", "t"), /ZENAI4_GATEWAY_URL/);
+  assert.throws(() => new GatewayClient("http://x", ""), /ZENAI4_USER_TOKEN/);
 });

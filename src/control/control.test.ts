@@ -42,7 +42,7 @@ const CHECKLIST = {
 };
 
 async function mkEnv(opts: { gateway?: SecureGatewayOptions; monitor?: Parameters<typeof buildControlPlane>[0]["monitor"] } = {}) {
-  const dir = mkdtempSync(join(tmpdir(), "governai-control-"));
+  const dir = mkdtempSync(join(tmpdir(), "zenai4-control-"));
   const dbPath = join(dir, "cp.db");
   const siemPath = join(dir, "siem.jsonl");
   const cp = buildControlPlane({ dbPath, siemPath, monitor: opts.monitor });

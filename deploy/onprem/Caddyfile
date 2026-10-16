@@ -1,7 +1,7 @@
-# TLS termination for governAI. Pick ONE tls line:
+# TLS termination for ZenAi4. Pick ONE tls line:
 #   tls internal                         Caddy's own CA - fine for a pilot; clients must trust it
 #   tls /certs/cert.pem /certs/key.pem   your company certificate (put files in ./certs)
-{$GOVERNAI_HOSTNAME} {
+{$ZENAI4_HOSTNAME} {
 	tls internal
 
 	request_body {

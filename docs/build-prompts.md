@@ -1,4 +1,4 @@
-# Build prompts for governAI
+# Build prompts for ZenAi4
 
 How to build the product with Claude Code, Cursor or Google AI Studio, one stage at a time.
 Each prompt is self-contained and ends with a "done when" check. Paste them in order; do not
@@ -27,7 +27,7 @@ check each vendor's current documentation before relying on a specific feature.
 
 Save as `AGENTS.md` (Cursor, and read by Claude Code alongside `CLAUDE.md`) or as a Cursor always-apply rule.
 
-    # governAI - standing instructions
+    # ZenAi4 - standing instructions
 
     Product: a governance control plane for AI agents across providers and platforms. Registration,
     identity, policy, budget, audit. Language: TypeScript on Node 22, ESM (NodeNext), strict mode.
@@ -55,7 +55,7 @@ In Cursor, switch to Plan mode, paste the prompt, review the plan, then run it. 
 
 ### A0. Scaffold
 
-    Create a TypeScript project for "governAI": Node 22, ESM with NodeNext module resolution, strict mode,
+    Create a TypeScript project for "ZenAi4": Node 22, ESM with NodeNext module resolution, strict mode,
     outDir dist, rootDir src. Dependencies: better-sqlite3, express, nanoid, zod. Dev dependencies: typescript,
     @types/node, @types/express, @types/better-sqlite3. npm scripts: build (tsc), test (build, then
     node --test --test-force-exit on the compiled test files). Add .gitignore (node_modules, dist, *.db, *.db-*).
@@ -160,7 +160,7 @@ In Cursor, switch to Plan mode, paste the prompt, review the plan, then run it. 
       GET  /v1/audit                        auditor or admin; reading it is itself logged in the user stream.
       GET  /v1/audit/verify                 {intact, firstBrokenSeq}.
       GET  /v1/security/alerts
-    The process entry reads GOVERNAI_DB_PATH, GOVERNAI_SIEM_PATH, PORT, TRUST_PROXY, RATE_LIMIT_PER_MIN and drains
+    The process entry reads ZENAI4_DB_PATH, ZENAI4_SIEM_PATH, PORT, TRUST_PROXY, RATE_LIMIT_PER_MIN and drains
     gracefully on SIGTERM.
     Tests (start the app on port 0 and use fetch): the identical-401 property across missing/garbage/wrong-secret;
     human token refused on /v1/call; suspension and rotation kill credentials immediately; agent-impersonation refused;
@@ -282,7 +282,7 @@ entered in a settings screen and kept only in memory (never in local storage or 
 
 ### U1. Shell and agent registry screens
 
-    Build a React console for governAI. Left navigation: Agents, Review queue, Audit log, Security alerts, Settings.
+    Build a React console for ZenAi4. Left navigation: Agents, Review queue, Audit log, Security alerts, Settings.
     Settings: base URL and token fields, held in memory only, with a "Test connection" button calling GET /v1/agents.
     Agents screen: a table (name, owner, sub-owner, lifecycle state as a coloured badge, risk tier) with a "Register agent"
     button. The registration form validates on the client (required fields, owner and sub-owner differ) but ALWAYS shows

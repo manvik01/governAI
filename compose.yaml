@@ -1,32 +1,32 @@
-# governAI - run locally (laptop or a single server, no TLS).
+# ZenAi4 - run locally (laptop or a single server, no TLS).
 #
-#   cp .env.example .env            # then set GOVERNAI_BACKUP_KEY
+#   cp .env.example .env            # then set ZENAI4_BACKUP_KEY
 #   docker compose up -d --build
-#   docker compose exec gateway governai-admin init --admin-email you@company.com --admin-name "Your Name"
+#   docker compose exec gateway zenai4-admin init --admin-email you@company.com --admin-name "Your Name"
 #
 # The gateway is published on 127.0.0.1 only. For other machines to reach it,
 # use the on-premises setup with TLS in deploy/onprem/ instead of opening this port.
 
-name: governai
+name: zenai4
 
 services:
   gateway:
     build: .
-    image: governai:local
+    image: zenai4:local
     restart: unless-stopped
     env_file:
       - path: .env
         required: false
     environment:
-      GOVERNAI_DB_PATH: /data/governai.db
-      GOVERNAI_SIEM_PATH: /data/audit-siem.jsonl
+      ZENAI4_DB_PATH: /data/zenai4.db
+      ZENAI4_SIEM_PATH: /data/audit-siem.jsonl
       PORT: "8787"
       TRUST_PROXY: "0"           # never 1 without a proxy in front: clients could forge their address
     ports:
-      - "127.0.0.1:${GOVERNAI_PORT:-8787}:8787"
+      - "127.0.0.1:${ZENAI4_PORT:-8787}:8787"
     volumes:
-      - governai-data:/data
-      - governai-backups:/backups
+      - zenai4-data:/data
+      - zenai4-backups:/backups
     read_only: true
     tmpfs:
       - /tmp
@@ -35,5 +35,5 @@ services:
     stop_grace_period: 30s
 
 volumes:
-  governai-data:
-  governai-backups:
+  zenai4-data:
+  zenai4-backups:
