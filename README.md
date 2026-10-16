@@ -183,7 +183,7 @@ PRD, with the decisions taken on each gap in the original, is in
 ## Agent onboarding, authenticated gateway, audit and security monitoring
 
 ```bash
-npm test                       # 39 tests across budget, control plane, admin CLI and MCP admin
+npm test                       # 66 tests across budget, control plane, registration/discovery, connectors, admin CLI and MCP admin
 ZENAI4_DB_PATH=./zenai4.db npm run server   # authenticated gateway on :8787
 docker compose up -d --build                    # container; see docs/deployment/local-and-onprem.md
 ```
@@ -201,6 +201,25 @@ docker compose up -d --build                    # container; see docs/deployment
 `npm run server:dev` is the old unauthenticated server, for local experiments only.
 Requirements: [`docs/PRD.md`](docs/PRD.md). Step-by-step prompts for building this in
 Claude Code, Cursor or Google AI Studio: [`docs/build-prompts.md`](docs/build-prompts.md).
+
+## Phase 1: registration and discovery
+
+Every agent gets one registry record before it may act, whether a person registered it or discovery found it.
+Full details, routes, CLI and env vars: [`docs/phase1-registration-discovery.md`](docs/phase1-registration-discovery.md).
+
+- **Registration as code**: check an [`examples/agent.yaml`](examples/agent.yaml) into the agent's repo; CI runs
+  `POST /v1/agents/apply` ([`examples/ci/register-agent.yml`](examples/ci/register-agent.yml)) or
+  `zenai4-admin apply -f agent.yaml`. Idempotent by `metadata.id`; widening access to high/critical re-triggers review.
+- **Discovery**: failed or unknown agent credentials at the gateway, imported egress logs (CSV), and read-only
+  connectors for Entra ID, Okta, Copilot Studio, Gemini Enterprise and GitHub (MCP configs, leaked LLM keys,
+  fingerprinted, never stored), every 6 hours. Turn them on with `ZENAI4_SCHEDULER=1 ZENAI4_DISCOVERY_CONNECTORS=...`.
+- **Shadow agent queue**: `GET /v1/discovery?queue=triage`; owners claim (creates a draft they own), security assigns an
+  owner, ignores or disables.
+- **Lifecycle and risk**: Draft → Pending approval → Active → Suspended → Retired, enforced by a transition table;
+  risk tier computed from money, personal data, irreversible actions and autonomy, raised by owners and lowered only by
+  security.
+- **Expiry**: 90 days unless the owner recertifies; the gateway refuses expired agents immediately; an hourly sweep
+  suspends them and revokes credentials.
 
 ## Where the differentiator lives
 
