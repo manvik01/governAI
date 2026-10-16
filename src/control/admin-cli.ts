@@ -28,6 +28,7 @@ import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import { buildControlPlane, DEFAULT_PROFILES, type ControlPlane } from "./control-plane.js";
 import type { Role } from "./identity.js";
 import type { AccessProfile } from "./access-profiles.js";
+import { PG_GROUPS, PG_HELP, runPg } from "../db/cli.js";
 
 const ROLES: Role[] = ["admin", "security_reviewer", "budget_admin", "auditor", "agent_owner"];
 const AUTONOMY = ["A0", "A1", "A2", "A3", "A4"];
@@ -46,6 +47,8 @@ const HELP = `zenai4-admin - operator CLI (reads ZENAI4_DB_PATH)
   audit export [--out <file.jsonl>]
   backup --out <file>                                        encrypted; needs ZENAI4_BACKUP_KEY
   restore --in <file> --to <new.db>                          decrypts, then verifies integrity
+
+${PG_HELP.trim()}
 
 Exit codes: 0 ok, 1 failure, 2 usage error.
 `;
@@ -97,6 +100,7 @@ async function run(argv: string[]): Promise<number> {
     process.stdout.write(HELP);
     return group ? 0 : 2;
   }
+  if (PG_GROUPS.includes(group)) return runPg(argv);
   const flagArgs = ["init", "backup", "restore"].includes(group) ? [sub, ...rest].filter((x) => x !== undefined) : rest;
   const { values } = parseArgs({
     args: flagArgs,
