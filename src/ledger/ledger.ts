@@ -172,6 +172,19 @@ export class Ledger {
     return rows.map(rowToEvent);
   }
 
+  /** Latest governed call per agent (phase 1.1: gateway calls count as
+   * activity for dormancy, alongside telemetry). */
+  lastActivityByAgent(): Map<string, string> {
+    const rows = this.db.prepare(`SELECT agent_id, max(timestamp) AS last FROM action_events GROUP BY agent_id`).all() as any[];
+    return new Map(rows.map((r) => [r.agent_id, r.last]));
+  }
+
+  /** Governed calls for one agent since an instant, counted by decision. */
+  decisionCountsSince(agentId: string, sinceIso: string): Record<string, number> {
+    const rows = this.db.prepare(`SELECT decision, count(*) AS n FROM action_events WHERE agent_id = ? AND timestamp >= ? GROUP BY decision`).all(agentId, sinceIso) as any[];
+    return Object.fromEntries(rows.map((r) => [r.decision, r.n]));
+  }
+
   /** Returns one action event by id. Used to reconstruct the original
    * request (agent, tool, parameters) when resolving an approval out of
    * band — e.g. from a separate approve-cli process that only has an

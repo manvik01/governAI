@@ -7,6 +7,11 @@
 // discovery connectors and the expiry sweep. The scheduler is built but not
 // started here; the gateway process starts it when ZENAI4_SCHEDULER=1, so
 // tests and the CLI never run background jobs by accident.
+//
+// Phase 1.1 adds telemetry: an intake store (sources, batches, sessions,
+// steps, hash-chained policy violations, alerts), the intake service the
+// gateway's /v1/intake routes call, and reconciliation + payload retention
+// registered as scheduler jobs (hourly and daily by default).
 
 import Database from "better-sqlite3";
 import { AgentRegistry } from "../registry/registry.js";
@@ -24,6 +29,10 @@ import { ManifestService } from "./manifest.js";
 import { DiscoveryService } from "../discovery/discovery.js";
 import { Scheduler, intervalFromEnv } from "../discovery/scheduler.js";
 import type { DiscoveryConnector } from "../discovery/connectors.js";
+import { DEFAULT_TELEMETRY_CONFIG, telemetryConfigFromEnv, type TelemetryConfig } from "../telemetry/config.js";
+import { TelemetryStore } from "../telemetry/store.js";
+import { IntakeService } from "../telemetry/intake.js";
+import { ReconcileService } from "../telemetry/reconcile.js";
 
 export interface ControlPlaneOptions {
   dbPath: string;
@@ -39,6 +48,10 @@ export interface ControlPlaneOptions {
   connectors?: DiscoveryConnector[];
   /** Interval for connector runs; defaults to ZENAI4_DISCOVERY_INTERVAL_HOURS or 6h. */
   discoveryIntervalMs?: number;
+  /** Telemetry settings. Unset keys come from ZENAI4_* env (when readEnv) or defaults. */
+  telemetry?: Partial<TelemetryConfig>;
+  /** Read telemetry settings from the environment (default true; tests pass false). */
+  readTelemetryEnv?: boolean;
 }
 
 export function buildControlPlane(opts: ControlPlaneOptions) {
@@ -80,6 +93,18 @@ export function buildControlPlane(opts: ControlPlaneOptions) {
   const monitor = new SecurityMonitor(db, audit, opts.monitor);
 
   const ledger = new Ledger(opts.dbPath);
+  const telemetryConfig: TelemetryConfig = {
+    ...(opts.readTelemetryEnv === false ? DEFAULT_TELEMETRY_CONFIG : telemetryConfigFromEnv()),
+    ...(opts.telemetry ?? {}),
+  };
+  const telemetry = new TelemetryStore(db, opts.now);
+  const intake = new IntakeService(telemetry, registry, audit, telemetryConfig, opts.now);
+  const reconcile = new ReconcileService(telemetry, registry, registration, discovery, profiles, ledger, audit, telemetryConfig, opts.now);
+  scheduler.add({ id: "telemetry-reconcile", intervalMs: telemetryConfig.reconcileIntervalMs, run: async () => {
+    const r = reconcile.run();
+    return { items: r.stepsProcessed, created: r.newDiscoveries + r.alertsRaised };
+  } });
+  scheduler.add({ id: "telemetry-retention", intervalMs: 24 * 60 * 60 * 1000, run: async () => ({ items: reconcile.retentionSweep().purged }) });
   const policyEngine = new PolicyEngine(registry, ledger);
   const gateway = new Gateway(registry, policyEngine, ledger, opts.approvals ?? new StderrApprovalChannel());
 
@@ -104,7 +129,7 @@ export function buildControlPlane(opts: ControlPlaneOptions) {
 
   return {
     db, audit, registry, directory, profiles, credentials, registration, monitor, ledger, policyEngine, gateway, savePolicy,
-    manifests, discovery, scheduler,
+    manifests, discovery, scheduler, telemetry, telemetryConfig, intake, reconcile,
     close() {
       scheduler.stop();
       ledger.close();
