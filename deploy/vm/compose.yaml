@@ -1,0 +1,170 @@
+# ZenAi4 - single lightweight VM: gateway + telemetry intake behind TLS, with an
+# optional trimmed Supabase stack (Postgres 17 + Studio + postgres-meta) for the
+# Postgres schema in supabase/migrations.
+#
+#   cd deploy/vm
+#   cp ../../.env.example .env        # set every value marked "deploy/vm" (see docs/deployment/vm.md)
+#   docker compose up -d --build
+#   docker compose exec gateway zenai4-admin init --admin-email you@company.com --admin-name "Your Name"
+#   docker compose exec gateway zenai4-admin source add --name otel-vm1 --as you@company.com   # token for the collector
+#   docker compose --profile collector up -d                                                  # optional local collector
+#   (Postgres schema) see docs/deployment/vm.md "Apply the ZenAi4 migrations"
+#
+# Image tags are pinned; they were chosen from the vendors' release lists but
+# not pulled during development (no registry access). Check them before use.
+#
+# What is reachable from where:
+#   - Caddy (443/80) is the ONLY service published on the network. It fronts the
+#     gateway, which serves the API and the /v1/intake/* telemetry endpoints.
+#   - Postgres and Studio are bound to 127.0.0.1 only. Reach Studio from your
+#     laptop with an SSH tunnel (docs/deployment/vm.md); never open these ports.
+#   - postgres-meta and the gateway are on internal networks with no published port.
+#
+# IMPORTANT: the running gateway still stores everything in SQLite (/data). The
+# Postgres service holds the migrated schema for reporting work and review; the
+# gateway is NOT wired to it yet. No auth, realtime, storage, kong or analytics
+# services are included: the zenai4 schemas are not exposed through a Data API.
+
+name: zenai4-vm
+
+services:
+  gateway:
+    build: ../..
+    image: zenai4:local
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ZENAI4_DB_PATH: /data/zenai4.db
+      ZENAI4_SIEM_PATH: /data/audit-siem.jsonl
+      PORT: "8787"
+      TRUST_PROXY: "1"            # safe: only Caddy can reach the gateway
+      ZENAI4_SCHEDULER: "1"       # discovery connectors, expiry sweep, telemetry reconciliation and retention
+    expose: ["8787"]
+    networks: [app]
+    volumes:
+      - zenai4-data:/data
+      - zenai4-backups:/backups
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    stop_grace_period: 30s
+
+  proxy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      gateway:
+        condition: service_healthy
+    environment:
+      ZENAI4_HOSTNAME: ${ZENAI4_HOSTNAME:?set ZENAI4_HOSTNAME in .env}
+    ports:
+      - "443:443"
+      - "80:80"
+    networks: [app, edge]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+
+  # ---- trimmed Supabase: Postgres + postgres-meta + Studio only
+  db:
+    image: supabase/postgres:17.4.1.054
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: postgres
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"     # loopback only: use an SSH tunnel
+    networks: [db]
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      # Applied explicitly, in order, by the command in docs/deployment/vm.md (not auto-run).
+      - ../../supabase/migrations:/zenai4-migrations:ro
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    security_opt: [no-new-privileges:true]
+
+  meta:
+    image: supabase/postgres-meta:v0.91.0
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: "8080"
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: "5432"
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    expose: ["8080"]
+    networks: [db]
+    security_opt: [no-new-privileges:true]
+
+  studio:
+    image: supabase/studio:2025.06.30-sha-6f5982d
+    restart: unless-stopped
+    depends_on:
+      meta:
+        condition: service_started
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      DEFAULT_ORGANIZATION_NAME: ZenAi4
+      DEFAULT_PROJECT_NAME: zenai4-vm
+      # Studio wants these for the (absent) API gateway; they are placeholders, not secrets.
+      SUPABASE_URL: http://localhost:8000
+      SUPABASE_PUBLIC_URL: http://localhost:8000
+      SUPABASE_ANON_KEY: not-used
+      SUPABASE_SERVICE_KEY: not-used
+      NEXT_PUBLIC_ENABLE_LOGS: "false"
+    ports:
+      - "127.0.0.1:${STUDIO_PORT:-3000}:3000"       # loopback only: use an SSH tunnel
+    networks: [db]
+    security_opt: [no-new-privileges:true]
+
+  # ---- optional: OpenTelemetry Collector on this VM (agents on the VM send OTLP to it)
+  otel-collector:
+    profiles: [collector]
+    image: otel/opentelemetry-collector-contrib:0.129.1
+    restart: unless-stopped
+    command: ["--config=/etc/otelcol/config.yaml"]
+    environment:
+      ZENAI4_INTAKE_URL: https://${ZENAI4_HOSTNAME}
+      ZENAI4_SOURCE_TOKEN: ${ZENAI4_SOURCE_TOKEN:?create one with zenai4-admin source add and put it in .env}
+    ports:
+      - "127.0.0.1:4318:4318"                     # OTLP/HTTP from agents on this host
+    extra_hosts:
+      - "${ZENAI4_HOSTNAME}:host-gateway"         # reach Caddy on this host by its TLS name
+    networks: [edge]
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol/config.yaml:ro
+      - ./certs:/certs:ro
+      - otel-queue:/var/lib/otelcol/queue
+    security_opt: [no-new-privileges:true]
+
+networks:
+  app:
+    internal: true      # gateway has no route out
+  db:
+    internal: true      # database tier has no route out
+  edge: {}
+
+volumes:
+  zenai4-data:
+  zenai4-backups:
+  caddy-data:
+  caddy-config:
+  pg-data:
+  otel-queue:

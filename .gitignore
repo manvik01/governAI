@@ -7,3 +7,6 @@ deploy/onprem/.env
 deploy/onprem/certs/*
 !deploy/onprem/certs/.gitkeep
 *.bak
+deploy/vm/.env
+deploy/vm/certs/*
+!deploy/vm/certs/.gitkeep
