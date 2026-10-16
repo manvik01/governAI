@@ -1,5 +1,10 @@
 # governAI - build prompts for milestones M0 to M6
 
+> **Revised 16 October 2026:** the build order changed (see `docs/PRD.md` section 10). Still
+> valid: Prompt 0, M0, M1.1, M1.2, M1.5, M1.6, M2.1 (shadow mode), M2.4 (Slack), the M1 review
+> and the recovery prompts. Stopped: M1.4. Deferred: M4 and M5. Discovery (phase 1), recertification
+> (phase 2) and the MAS evidence pack (phase 3) need new prompts written to the same pattern.
+
 For Cursor (Agent mode) or Claude Code. These continue `docs/build-prompts.md` (A0-A10 built the
 first slice) and follow the milestones in section 10 of `docs/PRD.md`.
 

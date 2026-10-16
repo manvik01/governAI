@@ -200,21 +200,33 @@ keys; TLS terminated at the ingress with mTLS to agents where required.
 5. Retention: how long must audit and user logs be kept, and who may export them?
 6. Should the console be a separate product surface or part of the gateway?
 
-## 10. Milestones
+## 10. Milestones (revised 16 October 2026)
 
-Sequenced by one rule: the shortest path to a design partner running real agents through the
-gateway, then the work a second customer needs. Sizes are relative effort for one founder
-using AI coding tools, not commitments.
+A market review (Microsoft Agent 365 and AWS AgentCore Policy now generally available, LiteLLM
+already enforcing budgets for free, Cyera buying Oasis for about $1B) changed the order of work.
+The MVP now leads with discovery, ownership and MAS-mapped evidence for regulated APAC firms.
+Enforcement plugs into gateways customers already run. The full plan with exit tests is in the
+MVP spec doc; this table is the build order for the repository.
 
-| # | Milestone | Scope | Exit test | Size |
-|---|---|---|---|---|
-| M0 | Baseline | Reconcile `main` with the Cursor commits; CI running `npm test`; Docker image built, run and scanned | Clean checkout builds, tests pass, container answers `/readyz` | S |
-| M1 | Deployable single node | Bootstrap admin CLI (first user, profile, token); model-call and budget route on the secure gateway; provider keys held by the gateway, never by agents; MCP proxy mode; encrypted backup of the SQLite file | An agent with no provider key completes a model call only through the gateway; a denied call never reaches the provider | M |
-| M2 | Human loop and visibility | Console UI (agents, review queue, audit search, alerts, budgets); Slack or Teams approvals; **shadow mode** (log what policy would have blocked, enforce nothing) | A reviewer registers, approves and suspends an agent without the API; shadow mode runs a week on live traffic without breaking it | M |
-| M3 | Design-partner pilot | One customer, on-premises or their cloud VM, 3 to 5 real agents; weekly review of findings; pricing and metering switched on | Partner keeps it running 30 days; at least one real policy denial and one real budget stop recorded | M |
-| M4 | Scale-out | Async repository layer; Postgres with row locks; Redis counters; single audit writer; autoscaling manifests | N-replica test: no budget over-allocation, intact audit chain, SIGTERM drains cleanly (closes F3 acceptance) | L |
-| M5 | Enterprise identity and evidence | OIDC login, SCIM directory, short-lived agent credentials, OTel/OCSF export, retention and legal-hold rules, tenant isolation | Leaver removed in the IdP loses access within minutes; tenant A cannot read tenant B in a test | L |
-| M6 | Assurance and launch | Independent penetration test; standards mapping verified against current text; SLOs and runbooks; SOC 2 readiness | Pen test has no open high findings; a customer security questionnaire can be answered from the repo | M |
+| Phase | Weeks | Build | Exit test |
+|---|---|---|---|
+| 0 Validate and clear | 0-1 | No code. Employer IP clearance; 10 interviews with Singapore FI security, AI platform and model-risk leads | 6 of 10 rank agent inventory or MAS accountability in their top three problems; 2 pilot letters |
+| 1 Discover | 1-3 | Connector interface (read-only, scheduled, audited); GitHub, LiteLLM, OpenAI and Anthropic admin, AWS AgentCore, Microsoft Graph connectors in the partner's order; duplicate merge; shadow queue and ownership claims | Seeded agents in 2 sources all found, merged and queued; connector credentials encrypted |
+| 2 Own and recertify | 3-5 | Re-review on new tool, scope, data class or model; approval expiry and recertification; decommissioning with revocation evidence; credential metadata inventory (never secrets) | Tests prove each trigger, expiry suspension and revocation evidence |
+| 3 Prove | 5-7 | MAS AI Risk Management Guidelines control map as versioned YAML (adviser-reviewed); per-agent materiality assessment; evidence pack (PDF + JSON lines with chain proof); gap report | Partner's risk lead would use the sample pack |
+| 4 Enforce through connectors | 7-9 | One decision API for all adapters; LiteLLM pre- and post-call hooks; harden MCP proxy; shadow mode with would-have-blocked report; optional Cedar export for AgentCore | One real path in shadow 7 days, then enforced; added latency measured |
+| 5 Operate | 9-10 | Console (inventory and shadow queue, agent detail, review queue, evidence and gaps, alerts); Slack approvals; pilot runbook | Browser test: discover, claim, review, export on a fresh container |
+| 6 Pilot | 10-12 | On-premises install at the partner; week-1 readout; weekly findings | Success criteria met and paid conversion agreed |
+
+Stopped or deferred:
+- Stopped: OpenAI- and Anthropic-compatible endpoints (build prompt M1.4). LiteLLM covers this.
+- Deferred until a customer needs it: Postgres, Redis and multi-node scale-out (M4).
+- Deferred to the first paying customer's identity provider: OIDC, SCIM and short-lived credentials (M5).
+- Frozen as built: billing engine, context layer and multi-agent task graph.
+
+Superseded plan (kept for reference): M0 baseline, M1 deployable node, M2 human loop, M3 pilot,
+M4 scale-out, M5 enterprise identity, M6 assurance. M0 is done; M1.1 (admin CLI) and M1.6 backup
+are done; the rest is replaced by the phases above.
 
 ### Requirements this PRD does not yet contain (add before M1)
 
