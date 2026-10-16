@@ -371,6 +371,8 @@ is version-specific.
   no Postgres-backed store exists yet. The `prove.*` evidence tables are written only by
   that future store; today the same evidence is in the hash-chained audit log
   (`discovery.claim`, `agent.recertify`, `agent.risk_tier.set`).
+* **Phase 1.1** adds telemetry: see `docs/phase1.1-telemetry-reconciliation.md` (discovery
+  source `telemetry`, drift and dormant checks, activity summary at recertification).
 * **No "un-ignore" route.** `ignored → new` is allowed in the transition table but has no
   route yet.
 * **Owner notifications** (for example "expiring in 14 days" sent to owners) are not sent.

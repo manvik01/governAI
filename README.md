@@ -221,6 +221,30 @@ Full details, routes, CLI and env vars: [`docs/phase1-registration-discovery.md`
 - **Expiry**: 90 days unless the owner recertifies; the gateway refuses expired agents immediately; an hourly sweep
   suspends them and revokes credentials.
 
+## Phase 1.1: telemetry intake and reconciliation
+
+Agents' observed behaviour now flows through the registry. Send OpenTelemetry GenAI traces
+(through an OTel Collector) or ZenAi4 step batches to `POST /v1/intake/otlp` or
+`/v1/intake/steps`, authenticated with a per-source token (`zenai4-admin source add`) or the
+agent's own credential. Payloads are `metadata`-only by default; in `redacted` mode they are
+secret-scrubbed, PII-redacted and truncated, and reasoning text is dropped unless switched on.
+Steps are append-only and deduplicated by sequence; policy violations are hash-chained.
+
+An hourly reconciliation job:
+
+- turns unregistered agents into discovery rows;
+- raises drift alerts for tools or models outside an agent's registration (`alert_only` by
+  default, `enforce_review` sends the agent back to security review);
+- flags activity from suspended or expired agents, sequence gaps and dormant agents;
+- raises the risk tier after repeated violations.
+
+Recertification returns a 90-day activity summary. The VM deployment (`deploy/vm/`) adds a
+TLS-fronted intake, a Collector config, and a loopback-only Postgres + Studio for the schema.
+The app itself still runs on SQLite.
+
+Details, design decisions and limits: [`docs/phase1.1-telemetry-reconciliation.md`](docs/phase1.1-telemetry-reconciliation.md).
+VM setup and the SSH tunnel to Studio: [`docs/deployment/vm.md`](docs/deployment/vm.md).
+
 ## Where the differentiator lives
 
 - `src/policy/engine.ts` — the stateful velocity/cumulative rule evaluation.
