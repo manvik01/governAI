@@ -160,9 +160,12 @@ export function createSecureGateway(cp: ControlPlane, options: SecureGatewayOpti
   const jsonParser = express.json({ limit: options.maxBodyBytes ?? 64 * 1024 });
   // Intake bodies are read later, after authentication, with their own cap.
   app.use((req, res, next) => (isIntakePath(req.path) ? next() : jsonParser(req, res, next)));
-  // agent.yaml manifests and egress CSVs may be posted raw.
-  app.use(express.text({ type: ["application/yaml", "application/x-yaml", "text/yaml"], limit: options.maxBodyBytes ?? 64 * 1024 }));
-  app.use(express.text({ type: ["text/csv"], limit: options.maxCsvBytes ?? 5 * 1024 * 1024 }));
+  // agent.yaml manifests and egress CSVs may be posted raw (never on intake paths:
+  // nothing there is read before authentication).
+  const yamlParser = express.text({ type: ["application/yaml", "application/x-yaml", "text/yaml"], limit: options.maxBodyBytes ?? 64 * 1024 });
+  const csvParser = express.text({ type: ["text/csv"], limit: options.maxCsvBytes ?? 5 * 1024 * 1024 });
+  app.use((req, res, next) => (isIntakePath(req.path) ? next() : yamlParser(req, res, next)));
+  app.use((req, res, next) => (isIntakePath(req.path) ? next() : csvParser(req, res, next)));
   app.use((err: any, req: Request, res: Response, next: NextFunction) => {
     if (!err) return next();
     cp.audit.append({

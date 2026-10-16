@@ -90,9 +90,11 @@ test("intake: unauthenticated batch gets 401 and nothing is stored", async () =>
   try {
     const before = count(env.cp, "intake_batches");
     for (const path of ["/v1/intake/steps", "/v1/intake/otlp"]) {
-      const r = await env.api("POST", path, undefined, { steps: [step(0, { prompt: "hello" })] });
-      assert.equal(r.status, 401);
-      assert.deepEqual(r.json, { error: "unauthorized" });
+      for (const ctype of ["application/json", "text/csv", "application/yaml"]) {
+        const r = await env.api("POST", path, undefined, JSON.stringify({ steps: [step(0, { prompt: "hello" })] }), { "content-type": ctype });
+        assert.equal(r.status, 401);
+        assert.deepEqual(r.json, { error: "unauthorized" });
+      }
     }
     assert.equal(count(env.cp, "intake_batches"), before);
     assert.equal(count(env.cp, "telemetry_steps"), 0);
