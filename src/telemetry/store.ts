@@ -614,9 +614,18 @@ function hashViolation(v: Violation): string {
   ].join("|"));
 }
 
-/** undefined -> null for SQLite named parameters. */
+/** Every optional named parameter a statement may reference; absent ones bind NULL. */
+const OPTIONAL_PARAMS = [
+  "seq", "spanId", "parentSpanId", "sourceId", "agentId", "agentState", "operation", "toolName", "model", "provider", "inputTokens",
+  "outputTokens", "totalTokens", "latencyMs", "errorClass", "promptRedacted", "inputRedacted", "outputRedacted", "reasoningRedacted",
+  "payloadSha256", "auditSeq", "observedAgentKey", "sessionId", "stepId", "policyVersion", "rule", "blockedAction",
+];
+
+/** undefined -> null for SQLite named parameters (better-sqlite3 rejects missing ones). */
 function nullify<T extends object>(o: T): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v === undefined ? null : v]));
+  const out: Record<string, unknown> = Object.fromEntries(OPTIONAL_PARAMS.map((k) => [k, null]));
+  for (const [k, v] of Object.entries(o)) out[k] = v === undefined ? null : v;
+  return out;
 }
 
 const u = <T>(v: T | null): T | undefined => (v === null ? undefined : v);

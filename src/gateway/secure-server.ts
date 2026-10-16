@@ -284,7 +284,7 @@ export function createSecureGateway(cp: ControlPlane, options: SecureGatewayOpti
 
   // ---- telemetry intake (phase 1.1)
   const intakeRaw = express.raw({ type: () => true, limit: cp.telemetryConfig.maxBatchBytes, inflate: true });
-  const intakeHandler = (endpoint: "steps" | "otlp") => (req: Request, res: Response) => {
+  const intakeHandler = (endpoint: "steps" | "otlp") => (req: Request, res: Response, next: NextFunction) => {
     const p = L(res).principal;
     if (p?.kind !== "agent" && p?.kind !== "source") {
       cp.audit.append({ stream: "audit", actorType: actorTypeOf(p), actorId: principalId(p), action: "access.denied", outcome: "denied", sourceIp: L(res).ip, requestId: L(res).requestId, details: { path: req.path, method: req.method, reason: "intake requires a source token or an agent credential" } });
@@ -294,6 +294,10 @@ export function createSecureGateway(cp: ControlPlane, options: SecureGatewayOpti
     const principal: IntakePrincipal = p.kind === "source" ? { kind: "source", source: source! } : { kind: "agent", agentId: p.agentId };
     const declared = Number(req.headers["content-length"] ?? 0) || 0;
     intakeRaw(req, res, (err?: any) => {
+      // This callback runs outside Express's own try/catch: hand failures to the error handler.
+      try { handleBody(err); } catch (e) { next(e); }
+    });
+    const handleBody = (err?: any) => {
       if (err) {
         const tooLarge = err.type === "entity.too.large";
         cp.intake.rejectBatch(principal, endpoint, declared, tooLarge ? "body exceeds the intake size limit" : "body could not be read", ctxOf(res));
@@ -329,7 +333,7 @@ export function createSecureGateway(cp: ControlPlane, options: SecureGatewayOpti
         });
       }
       res.status(out.status === "rejected" ? 422 : 200).json(out);
-    });
+    };
   };
   app.post("/v1/intake/steps", intakeHandler("steps"));
   app.post("/v1/intake/otlp", intakeHandler("otlp"));
